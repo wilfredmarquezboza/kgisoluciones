@@ -4,8 +4,10 @@
 <div class="fx-toolbar">
     <p class="has-text-grey fx-lede">Cobros por empresa y proyecto. Los montos son netos de detracción, es decir, lo que recibes en tu cuenta.</p>
     <div class="buttons">
+        <?php if (puede('facturas.editar')): ?>
         <button type="button" class="button is-primary" data-act="nuevo-plan"><span class="icon"><i class="fa-solid fa-plus"></i></span><span>Agregar proyecto</span></button>
         <button type="button" class="button" data-act="avisos" title="Envía el resumen de vencidos, por vencer y listos para facturar"><span class="icon"><i class="fa-solid fa-envelope"></i></span><span>Enviar resumen por correo</span></button>
+        <?php endif ?>
         <a class="button" href="<?= site_url('facturas/exportar') ?>"><span class="icon"><i class="fa-solid fa-file-csv"></i></span><span>Exportar CSV</span></a>
         <button type="button" class="button" data-act="print"><span class="icon"><i class="fa-solid fa-print"></i></span><span>Exportar a PDF</span></button>
     </div>
@@ -96,10 +98,14 @@
                 </div>
                 <p class="help">PDF, XML, JPG o PNG, hasta 5 MB.</p>
             </fieldset>
+            <fieldset class="fx-fieldset" id="grpHist">
+                <legend>Historial de cambios</legend>
+                <ul id="histLista" class="fx-abonos"></ul>
+            </fieldset>
             <p class="help is-danger fx-error" hidden></p>
         </section>
         <footer class="modal-card-foot">
-            <button type="submit" class="button is-primary">Guardar cambios</button>
+            <button type="submit" class="button is-primary" id="btnGuardarCuota">Guardar cambios</button>
             <button type="button" class="button" data-close>Cerrar</button>
         </footer>
     </form>
@@ -176,7 +182,9 @@
 <?= $this->endSection() ?>
 
 <?= $this->section('scripts') ?>
-<script>window.FX_URLS = {
+<script>window.FX_CAN = <?= json_encode(['editar' => puede('facturas.editar'), 'cobrar' => puede('facturas.cobrar'), 'eliminar' => puede('facturas.eliminar')]) ?>;
+window.FX_URLS = {
+    historial: <?= json_encode(site_url('facturas/historial')) ?>,
     datos: <?= json_encode(site_url('facturas/datos')) ?>, plan: <?= json_encode(site_url('facturas/plan')) ?>,
     quitar: <?= json_encode(site_url('facturas/quitar')) ?>, cuota: <?= json_encode(site_url('facturas/cuota')) ?>,
     actividad: <?= json_encode(site_url('facturas/actividad')) ?>, abono: <?= json_encode(site_url('facturas/abono')) ?>, adjunto: <?= json_encode(site_url('facturas/adjunto')) ?>, adjuntoDel: <?= json_encode(site_url('facturas/adjunto-eliminar')) ?>, avisos: <?= json_encode(site_url('facturas/avisos')) ?>, abonoDel: <?= json_encode(site_url('facturas/abono-eliminar')) ?>, actividadDel: <?= json_encode(site_url('facturas/actividad-eliminar')) ?>

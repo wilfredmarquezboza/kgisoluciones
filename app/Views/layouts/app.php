@@ -1,6 +1,14 @@
 <?php
 $u    = usuario_actual();
-$path = trim(service('uri')->getPath(), '/');
+$path   = trim(service('uri')->getPath(), '/');
+// Ruta activa: coincidencia exacta o el prefijo más largo (p. ej. perfiles/permisos/3 -> perfiles).
+$activa = null;
+foreach (menu_permitido() as [, $its]) {
+    foreach (array_keys($its) as $r) {
+        if ($path === $r) { $activa = $r; break 2; }
+        if (str_starts_with($path, $r . '/') && strlen($r) > strlen((string) $activa)) { $activa = $r; }
+    }
+}
 ?>
 <!doctype html>
 <html lang="es">
@@ -21,8 +29,8 @@ $path = trim(service('uri')->getPath(), '/');
     </div>
 
     <p class="sidebar-label">GENERAL</p>
-    <?php foreach (menu_items() as $grupo => [$icono, $items]):
-        $abierto = array_key_exists($path, $items); ?>
+    <?php foreach (menu_permitido() as $grupo => [$icono, $items]):
+        $abierto = $activa !== null && array_key_exists($activa, $items); ?>
         <div class="menu-group <?= $abierto ? 'is-open' : '' ?>">
             <button type="button" class="menu-group-toggle" aria-expanded="<?= $abierto ? 'true' : 'false' ?>">
                 <span><i class="fa-solid <?= $icono ?>"></i><?= esc($grupo) ?></span>
@@ -30,7 +38,7 @@ $path = trim(service('uri')->getPath(), '/');
             </button>
             <ul class="menu-items">
                 <?php foreach ($items as $ruta => [$label, $ico]): ?>
-                    <li><a href="<?= site_url($ruta) ?>" class="<?= $path === $ruta ? 'is-active' : '' ?>">
+                    <li><a href="<?= site_url($ruta) ?>" class="<?= $activa === $ruta ? 'is-active' : '' ?>">
                         <i class="fa-solid <?= $ico ?>"></i><?= esc($label) ?></a></li>
                 <?php endforeach ?>
             </ul>
@@ -68,6 +76,9 @@ $path = trim(service('uri')->getPath(), '/');
 <div id="toasts" class="toasts"></div>
 <script src="<?= base_url('assets/vendor/jquery.min.js') ?>"></script>
 <script src="<?= base_url('assets/js/app.js') ?>"></script>
+<?php foreach (['success' => true, 'error' => false] as $k => $ok): if ($m = session()->getFlashdata($k)): ?>
+<script>window.toast && toast(<?= json_encode($m) ?>, <?= $ok ? 'true' : 'false' ?>);</script>
+<?php endif; endforeach ?>
 <?= $this->renderSection('scripts') ?>
 </body>
 </html>

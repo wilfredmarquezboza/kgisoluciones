@@ -13,6 +13,7 @@
 
     <!-- Listado -->
     <section id="tab-list">
+        <div class="table-tools" id="filtros-wrap" style="margin-bottom:.4rem"><div id="filtros" style="display:flex;flex-wrap:wrap;gap:.6rem"></div></div>
         <div class="table-tools">
             <div class="field is-horizontal-inline">
                 <label class="label-inline">Mostrar</label>
@@ -49,6 +50,15 @@
             </div>
         </form>
     </section>
+</div>
+
+<div class="modal" id="detailModal">
+    <div class="modal-background"></div>
+    <div class="modal-card" style="width:min(680px,calc(100vw - 24px))">
+        <header class="modal-card-head"><div><p class="modal-card-title" id="detailTitle"></p><p class="is-size-7 has-text-grey" id="detailMeta"></p></div></header>
+        <section class="modal-card-body" id="detailBody"></section>
+        <footer class="modal-card-foot"><button class="button" id="detailClose">Cerrar</button></footer>
+    </div>
 </div>
 
 <div class="modal" id="confirmModal">

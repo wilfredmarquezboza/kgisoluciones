@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Auditoria;
+use App\Libraries\Permisos;
 use CodeIgniter\Database\BaseBuilder;
 use CodeIgniter\Database\Exceptions\DatabaseException;
 use CodeIgniter\Model;
@@ -20,6 +22,14 @@ abstract class CrudController extends BaseController
     protected array $searchColumns = [];
     /** Mapa clave de columna de la tabla => expresión SQL para ordenar. */
     protected array $sortMap = [];
+    /** Enlaces extra por fila: [['icon' => 'fa-key', 'title' => 'Permisos', 'href' => url]] (se agrega /ID). */
+    protected array $rowLinks = [];
+    /** Filtros extra sobre la lista: [['name','label','type' => select|date,'options' => []]]. */
+    protected array $filters = [];
+    protected bool $readOnly = false;
+    protected string $defaultDir = 'ASC';   // orden por id cuando no se elige columna
+    /** Si es true, al hacer clic en una fila se muestra su campo "cambios" (historial). */
+    protected bool $detail = false;
 
     /** @return list<array{key:string,label:string,class?:string}> */
     abstract protected function columns(): array;
@@ -48,7 +58,11 @@ abstract class CrudController extends BaseController
             'slug'    => $this->slug,
             'singular' => $this->singular,
             'columns' => $this->columns(),
-            'fields'  => $this->fields(),
+            'fields'  => $this->readOnly ? [] : $this->fields(),
+            'can'     => ['editar' => ! $this->readOnly && Permisos::puede("{$this->slug}.editar"), 'eliminar' => ! $this->readOnly && Permisos::puede("{$this->slug}.eliminar")],
+            'rowLinks' => $this->rowLinks,
+            'filters' => $this->filters,
+            'detail'  => $this->detail,
             'urls'    => [
                 'listar'   => site_url("{$this->slug}/listar"),
                 'guardar'  => site_url("{$this->slug}/guardar"),
@@ -71,7 +85,7 @@ abstract class CrudController extends BaseController
         $total = $this->selectList($this->builder())->countAllResults();
 
         $apply = function (BaseBuilder $b) use ($search) {
-            $b = $this->selectList($b);
+            $b = $this->applyFilters($this->selectList($b));
             if ($search !== '' && $this->searchColumns) {
                 $b->groupStart();
                 foreach ($this->searchColumns as $i => $col) {
@@ -87,9 +101,9 @@ abstract class CrudController extends BaseController
 
         $b       = $apply($this->builder());
         $orderBy = $this->sortMap[$sort] ?? null;
-        $b->orderBy($orderBy ?? $this->model()->table . '.id', $orderBy ? $dir : 'ASC');
+        $b->orderBy($orderBy ?? $this->model()->table . '.id', $orderBy ? $dir : $this->defaultDir);
         if ($orderBy) {
-            $b->orderBy($this->model()->table . '.id', 'ASC');
+            $b->orderBy($this->model()->table . '.id', $this->defaultDir);
         }
         $rows = $b->limit($per, ($page - 1) * $per)->get()->getResultArray();
 
@@ -140,6 +154,10 @@ abstract class CrudController extends BaseController
             return $this->fail('No se pudo guardar el registro.', 500);
         }
 
+        $id    = $exists ? $id : (int) $model->getInsertID();
+        $nuevo = $model->find($id);
+        Auditoria::registrar($exists ? 'editar' : 'crear', $this->slug, $id, ucfirst($this->singular) . ': ' . $this->etiqueta($nuevo), $exists ?: null, $nuevo);
+
         return $this->response->setJSON(['ok' => true, 'message' => $exists ? 'Registro actualizado.' : 'Registro creado.']);
     }
 
@@ -160,9 +178,31 @@ abstract class CrudController extends BaseController
             $ok = false;
         }
 
+        if ($ok) {
+            Auditoria::registrar('eliminar', $this->slug, $id, ucfirst($this->singular) . ': ' . $this->etiqueta($row), $row, null);
+        }
+
         return $ok
             ? $this->response->setJSON(['ok' => true, 'message' => 'Registro eliminado.'])
             : $this->fail('No se puede eliminar: tiene registros relacionados.', 409);
+    }
+
+    /** Hook: filtros extra del listado (lee $this->request->getGet()). */
+    protected function applyFilters(BaseBuilder $b): BaseBuilder
+    {
+        return $b;
+    }
+
+    /** Texto corto para identificar un registro en el historial. */
+    protected function etiqueta(?array $row): string
+    {
+        foreach (['nombre', 'nombres', 'clave', 'descripcion', 'email'] as $k) {
+            if (! empty($row[$k])) {
+                return (string) $row[$k];
+            }
+        }
+
+        return '#' . ($row['id'] ?? '?');
     }
 
     /** Hook: transforma los datos validados; puede devolver una respuesta de error. */

@@ -11,7 +11,7 @@ class InitialSeeder extends Seeder
         $now = date('Y-m-d H:i:s');
 
         $this->db->table('perfiles')->insert([
-            'nombre' => 'Administrador', 'descripcion' => 'Administrador',
+            'nombre' => 'Administrador', 'descripcion' => 'Administrador', 'es_admin' => 1,
             'created_at' => $now, 'updated_at' => $now,
         ]);
         $perfilId = $this->db->insertID();

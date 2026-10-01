@@ -4,7 +4,9 @@ namespace App\Controllers;
 
 use App\Libraries\Facturacion;
 use App\Models\AbonoModel;
+use App\Libraries\Auditoria;
 use App\Libraries\Avisos;
+use App\Libraries\Permisos;
 use App\Models\ActividadModel;
 use App\Models\AdjuntoModel;
 use App\Models\CuotaModel;
@@ -95,6 +97,28 @@ class Facturas extends BaseController
             $limpias[] = ['id' => $id, 'etiqueta' => $label, 'porcentaje' => round((float) $pct, 4), 'orden' => $i];
         }
 
+        // Lo ya cobrado queda protegido: solo un perfil con permiso de cobranza puede alterarlo.
+        $proyecto = $proyectos->find($pid);
+        if (! Permisos::puede('facturas.cobrar')) {
+            $cobradas = [];
+            foreach ($cuotas->where('proyecto_id', $pid)->findAll() as $c) {
+                if ($c['estado'] === 'pagado' || db_connect()->table('abonos')->where('cuota_id', $c['id'])->countAllResults() > 0) {
+                    $cobradas[$c['id']] = $c;
+                }
+            }
+            $enviadas = array_column($limpias, null, 'id');
+            $cambia   = $cobradas && ((float) $proyecto['monto'] !== round((float) $monto, 2) || $proyecto['moneda'] !== $moneda);
+            foreach ($cobradas as $cid => $c) {
+                if (! isset($enviadas[$cid]) || abs((float) $c['porcentaje'] - $enviadas[$cid]['porcentaje']) > 0.00005) {
+                    $cambia = true;
+                }
+            }
+            if ($cambia) {
+                return $this->fail('Hay pagos ya cobrados: solo un perfil con permiso para registrar cobros puede cambiar el monto, la moneda o sus porcentajes.', 403);
+            }
+        }
+
+        $antes = ['monto' => $proyecto['monto'], 'moneda' => $proyecto['moneda'], 'pagos' => $this->resumenPlan($pid)];
         $db = db_connect();
         $db->transStart();
         $proyectos->update($pid, ['moneda' => $moneda, 'monto' => round((float) $monto, 2)]);
@@ -112,6 +136,11 @@ class Facturas extends BaseController
         }
         $db->transComplete();
 
+        if ($db->transStatus()) {
+            Auditoria::registrar('editar', 'proyecto', $pid, 'Plan de pagos: ' . ($proyecto['nombre'] ?: $proyecto['departamento']), $antes,
+                ['monto' => round((float) $monto, 2), 'moneda' => $moneda, 'pagos' => $this->resumenPlan($pid)]);
+        }
+
         return $db->transStatus()
             ? $this->response->setJSON(['ok' => true, 'message' => 'Plan de pagos guardado.'])
             : $this->fail('No se pudo guardar el plan de pagos.', 500);
@@ -121,7 +150,7 @@ class Facturas extends BaseController
     public function quitar(int $id)
     {
         $proyectos = new ProyectoModel();
-        if (! $proyectos->find($id)) {
+        if (! ($p = $proyectos->find($id))) {
             return $this->fail('El proyecto ya no existe.', 404);
         }
         $db = db_connect();
@@ -135,6 +164,7 @@ class Facturas extends BaseController
         (new ActividadModel())->where('proyecto_id', $id)->delete();
         $proyectos->update($id, ['moneda' => null, 'monto' => null]);
         $db->transComplete();
+        Auditoria::registrar('eliminar', 'proyecto', $id, 'Quitado de facturación: ' . ($p['nombre'] ?: $p['departamento']), ['monto' => $p['monto'], 'moneda' => $p['moneda']], ['monto' => null, 'moneda' => null]);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Proyecto quitado del control de facturas.']);
     }
@@ -178,6 +208,11 @@ class Facturas extends BaseController
             return $this->fail('El hito no pertenece a este proyecto.', 422, 'actividad_id');
         }
 
+        $cambiaCobro = $estado !== $c['estado'] && ($estado === 'pagado' || $c['estado'] === 'pagado');
+        if ($cambiaCobro && ! Permisos::puede('facturas.cobrar')) {
+            return $this->fail('Solo un perfil con permiso para registrar cobros puede marcar o desmarcar un pago como pagado.', 403);
+        }
+
         $facturado = $estado !== 'pendiente';   // sin factura no hay emisión, vencimiento ni detracción
         $model->update($id, [
             'estado'            => $estado,
@@ -190,6 +225,7 @@ class Facturas extends BaseController
             'detr_fecha'        => $facturado ? $f['detr_fecha'] : null,
             'detr_ref'          => $facturado && $ref !== '' ? $ref : null,
         ]);
+        Auditoria::registrar($cambiaCobro ? 'cobro' : 'editar', 'cuota', $id, $this->nombreCuota($c) . ($estado !== $c['estado'] ? ": {$c['estado']} → $estado" : ''), $c, $model->find($id));
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Pago actualizado.']);
     }
@@ -226,6 +262,7 @@ class Facturas extends BaseController
 
         (new AbonoModel())->insert(['cuota_id' => $cuotaId, 'fecha' => $fecha, 'monto' => $monto, 'referencia' => $ref ?: null]);
         $this->sincronizar($cuotaId);
+        Auditoria::registrar('cobro', 'cuota', $cuotaId, 'Abono registrado · ' . $this->nombreCuota($cuota), null, ['abono' => number_format($monto, 2) . " el $fecha" . ($ref ? " ($ref)" : ''), 'estado' => $this->estadoDe($cuotaId)]);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Abono registrado.']);
     }
@@ -239,8 +276,19 @@ class Facturas extends BaseController
         }
         $model->delete($id);
         $this->sincronizar((int) $ab['cuota_id']);
+        $cuota = (new CuotaModel())->find($ab['cuota_id']);
+        Auditoria::registrar('cobro', 'cuota', (int) $ab['cuota_id'], 'Abono eliminado · ' . $this->nombreCuota($cuota), ['abono' => number_format((float) $ab['monto'], 2) . ' el ' . $ab['fecha']], ['estado' => $cuota['estado']]);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Abono eliminado.']);
+    }
+
+    /** Últimos movimientos de un pago (quién y cuándo). */
+    public function historial(int $cuotaId)
+    {
+        $rows = db_connect()->table('auditoria')->select('created_at, usuario_nombre, accion, resumen, cambios')
+            ->where('entidad', 'cuota')->where('registro_id', $cuotaId)->orderBy('id', 'DESC')->limit(15)->get()->getResultArray();
+
+        return $this->response->setJSON(['ok' => true, 'items' => $rows]);
     }
 
     // ---------------- Adjuntos ----------------
@@ -279,6 +327,8 @@ class Facturas extends BaseController
             'mime' => $mime, 'tamano' => $tam, 'usuario_id' => usuario_actual()['id'] ?? null,
         ]);
 
+        Auditoria::registrar('editar', 'cuota', $cuotaId, 'Documento adjuntado · ' . $this->nombreCuota((new CuotaModel())->find($cuotaId)), null, ['adjunto' => $nombre . ' (' . AdjuntoModel::TIPOS[$tipo] . ')']);
+
         return $this->response->setJSON(['ok' => true, 'message' => 'Documento adjuntado.']);
     }
 
@@ -303,6 +353,7 @@ class Facturas extends BaseController
         }
         @unlink(AdjuntoModel::dir() . $a['archivo']);
         $model->delete($id);
+        Auditoria::registrar('editar', 'cuota', (int) $a['cuota_id'], 'Documento eliminado · ' . $this->nombreCuota((new CuotaModel())->find($a['cuota_id'])), ['adjunto' => $a['nombre']], null);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Documento eliminado.']);
     }
@@ -312,6 +363,7 @@ class Facturas extends BaseController
     public function avisos()
     {
         [$ok, $msg] = (new Avisos())->enviar(false, true);
+        Auditoria::registrar('alerta', 'facturas', null, 'Resumen de cobranza por correo: ' . $msg);
 
         return $this->response->setStatusCode($ok ? 200 : 422)->setJSON(['ok' => $ok, 'message' => $msg]);
     }
@@ -391,7 +443,10 @@ class Facturas extends BaseController
         }
 
         $data = ['nombre' => $nombre, 'fecha' => $fecha ?: null, 'estado' => $estado, 'porcentaje' => (int) $pct];
+        $antes = $id ? $model->find($id) : null;
         $id ? $model->update($id, $data) : $model->insert($data + ['proyecto_id' => $proyectoId]);
+        $aid = $id ?: (int) $model->getInsertID();
+        Auditoria::registrar($id ? 'editar' : 'crear', 'actividad', $aid, 'Actividad: ' . $nombre, $antes, $model->find($aid));
 
         return $this->response->setJSON(['ok' => true, 'message' => $id ? 'Actividad actualizada.' : 'Actividad agregada.']);
     }
@@ -403,7 +458,9 @@ class Facturas extends BaseController
             return $this->fail('La actividad ya no existe.', 404);
         }
         (new CuotaModel())->where('actividad_id', $id)->set(['actividad_id' => null])->update();
+        $act = $model->find($id);
         $model->delete($id);
+        Auditoria::registrar('eliminar', 'actividad', $id, 'Actividad: ' . $act['nombre'], $act, null);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Actividad eliminada.']);
     }
@@ -439,6 +496,23 @@ class Facturas extends BaseController
     }
 
     // ---------------------------------------------------------------
+
+    private function nombreCuota(array $c): string
+    {
+        $p = (new ProyectoModel())->find($c['proyecto_id']);
+
+        return ($p['nombre'] ?: $p['departamento']) . ' · ' . $c['etiqueta'];
+    }
+
+    private function estadoDe(int $cuotaId): string
+    {
+        return (string) (new CuotaModel())->find($cuotaId)['estado'];
+    }
+
+    private function resumenPlan(int $pid): string
+    {
+        return implode(' | ', array_map(static fn ($c) => $c['etiqueta'] . ' ' . (float) $c['porcentaje'] . '%', (new CuotaModel())->where('proyecto_id', $pid)->orderBy('orden')->findAll()));
+    }
 
     /** @return array{0:float,1:float} neto del pago y suma de abonos registrados */
     private function netoYAbonado(array $cuota): array

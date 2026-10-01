@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Auditoria;
 use App\Libraries\Mailer;
 use App\Models\PasswordResetModel;
 use App\Models\PerfilModel;
@@ -34,6 +35,8 @@ class Auth extends BaseController
         $ok   = password_verify($password, $hash) && $u !== null;
 
         if (! $ok) {
+            Auditoria::registrar('acceso', 'acceso', $u['id'] ?? null, 'Intento de ingreso fallido: ' . mb_substr($email, 0, 120), null, null, $u['nombres'] ?? null);
+
             return redirect()->back()->withInput()->with('error', 'Correo o contraseña incorrectos.');
         }
         if (! (int) $u['activo']) {
@@ -41,9 +44,10 @@ class Auth extends BaseController
         }
 
         $this->startSession($u);
+        Auditoria::registrar('acceso', 'acceso', (int) $u['id'], 'Inicio de sesión');
         $usuarios->update($u['id'], ['ultimo_acceso' => date('Y-m-d H:i:s')]);
 
-        $destino = session()->get('redirect_to') ?: site_url('proyectos');
+        $destino = session()->get('redirect_to') ?: site_url('/');
         session()->remove('redirect_to');
 
         return redirect()->to($destino);
@@ -51,6 +55,7 @@ class Auth extends BaseController
 
     public function logout()
     {
+        Auditoria::registrar('acceso', 'acceso', session()->get('usuario')['id'] ?? null, 'Cierre de sesión');
         session()->destroy();
 
         return redirect()->to('/login')->with('success', 'Sesión cerrada correctamente.');
@@ -119,6 +124,7 @@ class Auth extends BaseController
 
         (new UsuarioModel())->update($r['usuario_id'], ['password' => password_hash($this->request->getPost('password'), PASSWORD_DEFAULT)]);
         $resets->update($r['id'], ['usado_en' => date('Y-m-d H:i:s')]);
+        Auditoria::registrar('acceso', 'acceso', (int) $r['usuario_id'], 'Contraseña restablecida por enlace de recuperación', null, null, 'Usuario #' . $r['usuario_id']);
 
         return redirect()->to('/login')->with('success', 'Contraseña actualizada. Ya puedes iniciar sesión.');
     }

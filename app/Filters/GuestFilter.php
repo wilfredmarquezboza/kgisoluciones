@@ -12,7 +12,7 @@ class GuestFilter implements FilterInterface
     public function before(RequestInterface $request, $arguments = null)
     {
         if (session()->get('usuario')) {
-            return redirect()->to('/proyectos');
+            return redirect()->to('/');
         }
 
         return null;

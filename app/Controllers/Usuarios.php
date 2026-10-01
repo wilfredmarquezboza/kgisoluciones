@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Permisos;
 use App\Models\PerfilModel;
 use App\Models\UsuarioModel;
 use CodeIgniter\Database\BaseBuilder;
@@ -61,6 +62,11 @@ class Usuarios extends CrudController
         if ($existing && (int) $existing['id'] === usuario_actual()['id'] && $data['activo'] === '0') {
             return $this->fail('No puedes desactivar tu propio usuario.', 409);
         }
+        // Siempre debe quedar al menos un administrador activo.
+        if ($existing && $this->esAdminActivo($existing) && (! Permisos::esAdmin((int) $data['perfil_id']) || $data['activo'] === '0')
+            && ! $this->quedaOtroAdmin((int) $existing['id'])) {
+            return $this->fail('Debe quedar al menos un administrador activo.', 409);
+        }
 
         if ($data['password'] === '') {
             unset($data['password']);
@@ -74,6 +80,21 @@ class Usuarios extends CrudController
 
     protected function cannotDelete(array $row): ?string
     {
-        return (int) $row['id'] === usuario_actual()['id'] ? 'No puedes eliminar tu propio usuario.' : null;
+        if ((int) $row['id'] === usuario_actual()['id']) {
+            return 'No puedes eliminar tu propio usuario.';
+        }
+
+        return $this->esAdminActivo($row) && ! $this->quedaOtroAdmin((int) $row['id']) ? 'Debe quedar al menos un administrador activo.' : null;
+    }
+
+    private function esAdminActivo(array $u): bool
+    {
+        return (int) $u['activo'] === 1 && Permisos::esAdmin((int) $u['perfil_id']);
+    }
+
+    private function quedaOtroAdmin(int $excluirId): bool
+    {
+        return db_connect()->table('usuarios')->join('perfiles', 'perfiles.id = usuarios.perfil_id')
+            ->where('perfiles.es_admin', 1)->where('usuarios.activo', 1)->where('usuarios.id !=', $excluirId)->countAllResults() > 0;
     }
 }

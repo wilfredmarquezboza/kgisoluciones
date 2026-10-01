@@ -264,3 +264,11 @@ body.auth { background: #fff; }
 .fx-det { min-height: 120px; } .fx-det-h { font-weight: 700; margin-bottom: .4rem; } .fx-det-s { font-size: .75rem; font-weight: 700; color: #6b7285; margin: .5rem 0 .2rem; text-transform: uppercase; }
 .fx-tip { position: fixed; z-index: 120; background: #20242f; color: #fff; padding: .5rem .7rem; border-radius: 6px; font-size: .8rem; line-height: 1.5; pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 @media print { .fx-tip { display: none !important; } .fx-toolbar select, .fx-toolbar .select { display: none; } }
+
+/* ---------- Permisos e historial ---------- */
+.btn-icon.is-perm { display: inline-flex; align-items: center; justify-content: center; background: #6c63d6; text-decoration: none; }
+.perm-table th, .perm-table td { vertical-align: middle; } .perm-table thead th { background: #e3e5e9; font-size: .8rem; }
+.perm-table input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--kgi-accent-dark); cursor: pointer; }
+.data-table tr.is-clickable { cursor: pointer; }
+.tag.acc-crear { background: #e2f3ea; color: #146a44; } .tag.acc-editar { background: #e3edf9; color: #1a5799; } .tag.acc-eliminar { background: #fbe8e4; color: #a2382a; }
+.tag.acc-cobro { background: #dff7f2; color: #067a68; } .tag.acc-acceso { background: #eef0f3; color: #4a5160; } .tag.acc-alerta { background: #fbf0d9; color: #7c5200; }

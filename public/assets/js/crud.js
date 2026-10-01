@@ -3,7 +3,8 @@
     'use strict';
 
     var cfg = JSON.parse($('#crud-config').text());
-    var state = { page: 1, per: 10, search: '', sort: '', dir: 'asc', rows: [], total: 0, filtered: 0 };
+    var state = { page: 1, per: 10, search: '', sort: '', dir: 'asc', rows: [], total: 0, filtered: 0, f: {} };
+    var can = cfg.can || {}, links = cfg.rowLinks || [], hasActions = !!(can.editar || can.eliminar || links.length), extra = hasActions ? 2 : 1;
     var delId = null, timer = null;
 
     function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
@@ -19,6 +20,7 @@
             case 'tag': return '<span class="tag is-light">' + esc(v) + '</span>';
             case 'estado': return Number(v) ? '<span class="tag is-active-ok">Activo</span>' : '<span class="tag is-off">Inactivo</span>';
             case 'avatar': return '<span class="row-avatar"><span class="avatar">' + esc(initials(v)) + '</span>' + esc(v) + '</span>';
+            case 'accion': return '<span class="tag acc-' + esc(v) + '">' + esc(v) + '</span>';
             case 'bar':
                 if (v == null) { return '<span class="has-text-grey-light">—</span>'; }
                 return '<span class="mini-bar"><span class="mini-track"><span style="width:' + Math.min(100, v) + '%"></span></span><b>' + Math.round(v) + '%</b></span>';
@@ -39,31 +41,35 @@
             h += '<th class="' + cls + '" data-key="' + c.key + '">' + esc(c.label) +
                 (c.sortable ? '<i class="fa-solid ' + (state.sort === c.key ? (state.dir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort') + ' sort"></i>' : '') + '</th>';
         });
-        $('#thead').html(h + '<th style="width:110px">ACCIONES</th></tr>');
+        $('#thead').html(h + (hasActions ? '<th style="width:' + (60 + 38 * ((can.editar ? 1 : 0) + (can.eliminar ? 1 : 0) + links.length)) + 'px">ACCIONES</th>' : '') + '</tr>');
     }
 
     function load() {
-        $.getJSON(cfg.urls.listar, { page: state.page, per: state.per, search: state.search, sort: state.sort, dir: state.dir })
+        $.getJSON(cfg.urls.listar, $.extend({ page: state.page, per: state.per, search: state.search, sort: state.sort, dir: state.dir }, state.f))
             .done(function (res) {
                 state.rows = res.data; state.total = res.total; state.filtered = res.filtered;
                 var pages = Math.max(1, Math.ceil(state.filtered / state.per));
                 if (state.page > pages) { state.page = pages; return load(); }
                 renderBody(); renderPager(pages);
             })
-            .fail(function () { $('#tbody').html('<tr><td class="empty" colspan="' + (cfg.columns.length + 2) + '">No se pudo cargar la información.</td></tr>'); });
+            .fail(function () { $('#tbody').html('<tr><td class="empty" colspan="' + (cfg.columns.length + extra) + '">No se pudo cargar la información.</td></tr>'); });
     }
 
     function renderBody() {
         var $b = $('#tbody').empty();
         if (!state.rows.length) {
-            $b.append('<tr><td class="empty" colspan="' + (cfg.columns.length + 2) + '">No hay datos para mostrar</td></tr>');
+            $b.append('<tr><td class="empty" colspan="' + (cfg.columns.length + extra) + '">No hay datos para mostrar</td></tr>');
         }
         state.rows.forEach(function (row, i) {
-            var tr = '<tr><td class="is-center">' + ((state.page - 1) * state.per + i + 1) + '</td>';
+            var tr = '<tr' + (cfg.detail ? ' class="is-clickable" data-id="' + row.id + '"' : '') + '><td class="is-center">' + ((state.page - 1) * state.per + i + 1) + '</td>';
             cfg.columns.forEach(function (c) { tr += '<td' + (c.key === 'nombre' && cfg.columns.length > 4 ? ' style="min-width:260px"' : '') + '>' + cell(c, row) + '</td>'; });
-            tr += '<td class="is-center"><span class="row-actions">' +
-                '<button class="btn-icon is-edit" data-id="' + row.id + '" title="Editar"><i class="fa-solid fa-pen"></i></button>' +
-                '<button class="btn-icon is-del" data-id="' + row.id + '" title="Eliminar"><i class="fa-solid fa-trash"></i></button></span></td></tr>';
+            if (hasActions) {
+                tr += '<td class="is-center"><span class="row-actions">' +
+                    links.map(function (l) { return row.es_admin ? '' : '<a class="btn-icon is-perm" title="' + esc(l.title) + '" href="' + esc(l.href) + '/' + row.id + '"><i class="fa-solid ' + esc(l.icon) + '"></i></a>'; }).join('') +
+                    (can.editar ? '<button class="btn-icon is-edit" data-id="' + row.id + '" title="Editar"><i class="fa-solid fa-pen"></i></button>' : '') +
+                    (can.eliminar && !row.es_admin ? '<button class="btn-icon is-del" data-id="' + row.id + '" title="Eliminar"><i class="fa-solid fa-trash"></i></button>' : '') + '</span></td>';
+            }
+            tr += '</tr>';
             $b.append(tr);
         });
         var from = state.filtered ? (state.page - 1) * state.per + 1 : 0;
@@ -185,6 +191,33 @@
             .fail(function (xhr) { toast((xhr.responseJSON || {}).message || 'No se pudo eliminar.', false); })
             .always(function () { $b.removeClass('is-loading'); closeConfirm(); });
     });
+
+    if (!can.editar) { $('.tabs li[data-tab=form]').hide(); }
+
+    /* ---------- Filtros extra ---------- */
+    (cfg.filters || []).forEach(function (f) {
+        var id = 'flt_' + f.name, ctl = f.type === 'date'
+            ? '<input class="input is-small" type="date" id="' + id + '" data-f="' + f.name + '">'
+            : '<div class="select is-small"><select id="' + id + '" data-f="' + f.name + '"><option value="">' + esc(f.label) + ': todos</option>' +
+                $.map(f.options || {}, function (v, k) { return '<option value="' + esc(k) + '">' + esc(v) + '</option>'; }).join('') + '</select></div>';
+        $('#filtros').append('<div class="field is-horizontal-inline">' + (f.type === 'date' ? '<label class="label-inline" for="' + id + '">' + esc(f.label) + '</label>' : '') + ctl + '</div>');
+    });
+    $('#filtros').on('change', '[data-f]', function () { state.f[$(this).data('f')] = this.value; state.page = 1; load(); });
+
+    /* ---------- Detalle de cambios (historial) ---------- */
+    $('#tbody').on('click', 'tr.is-clickable', function () {
+        var row = rowById($(this).data('id')); if (!row) { return; }
+        var cambios = {}; try { cambios = JSON.parse(row.cambios || '{}') || {}; } catch (e) { }
+        var filas = Object.keys(cambios).map(function (k) {
+            function v(x) { return x == null || x === '' ? '<span class="has-text-grey-light">(vacío)</span>' : esc(x); }
+            return '<tr><th>' + esc(k) + '</th><td>' + v(cambios[k][0]) + '</td><td>' + v(cambios[k][1]) + '</td></tr>';
+        }).join('');
+        $('#detailTitle').text(row.resumen);
+        $('#detailMeta').text((row.usuario_nombre || 'Sistema') + ' · ' + fmtDateTime(row.created_at).replace(/<[^>]+>/g, '') + (row.ip ? ' · ' + row.ip : ''));
+        $('#detailBody').html(filas ? '<table class="table is-fullwidth is-narrow"><thead><tr><th>Campo</th><th>Antes</th><th>Después</th></tr></thead><tbody>' + filas + '</tbody></table>' : '<p class="has-text-grey">Este evento no tiene detalle de campos.</p>');
+        $('#detailModal').addClass('is-active');
+    });
+    $('#detailModal .modal-background, #detailClose').on('click', function () { $('#detailModal').removeClass('is-active'); });
 
     renderHead(); load();
 })(jQuery);

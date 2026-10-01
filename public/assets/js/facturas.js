@@ -2,7 +2,7 @@
 (function ($) {
     'use strict';
 
-    var U = window.FX_URLS;
+    var U = window.FX_URLS, CAN = window.FX_CAN || {};
     var D = { proyectos: [], disponibles: [], igv: 18, detraccion: 12 };
     var S = { empresa: '__all__', estado: '__all__', q: '', abiertos: {} };
     var MON = { USD: { sim: 'US$', nombre: 'Dólares' }, PEN: { sim: 'S/', nombre: 'Soles' } };
@@ -102,7 +102,7 @@
             (fechas ? '<div class="fx-c-hint">' + fechas + '</div>' : '') +
             (c.adjuntos.length ? '<div class="fx-c-hint"><i class="fa-solid fa-paperclip"></i> ' + c.adjuntos.length + (c.adjuntos.length === 1 ? ' documento' : ' documentos') + '</div>' : '') +
             (c.hito ? '<div class="fx-c-hint">Hito: ' + esc(c.hito) + (c.hito_estado === 'Concluido' ? ' ✓' : '') + '</div>' : '') + det +
-            '<div class="fx-c-foot"><button type="button" class="button is-small" data-act="edit-cuota" data-id="' + c.id + '" data-pid="' + pr.id + '">Actualizar</button></div></li>';
+            '<div class="fx-c-foot"><button type="button" class="button is-small" data-act="edit-cuota" data-id="' + c.id + '" data-pid="' + pr.id + '">' + (CAN.editar || CAN.cobrar ? 'Actualizar' : 'Ver detalle') + '</button></div></li>';
     }
 
     function renderDesglose(pr, cuotas) {
@@ -121,11 +121,11 @@
         var lista = items.length ? '<ul class="fx-act-list">' + items.map(function (a) {
             return '<li class="fx-act"><div><div class="fx-act-name">' + esc(a.nombre) + '</div><div class="fx-act-date">' + (a.fecha ? fmtFecha(a.fecha) : 'Sin fecha') + '</div></div>' +
                 '<span class="fx-status is-' + slug(a.estado) + '">' + esc(a.estado) + '</span><span class="fx-act-pct">' + a.pct + '%</span>' +
-                '<div class="fx-act-tools"><button type="button" class="fx-link" data-act="edit-act" data-id="' + a.id + '" data-pid="' + pr.id + '">Editar</button>' +
-                '<button type="button" class="fx-link danger" data-act="del-act" data-id="' + a.id + '" data-pid="' + pr.id + '">Eliminar</button></div></li>';
+                '<div class="fx-act-tools">' + (CAN.editar ? '<button type="button" class="fx-link" data-act="edit-act" data-id="' + a.id + '" data-pid="' + pr.id + '">Editar</button>' : '') +
+                (CAN.eliminar ? '<button type="button" class="fx-link danger" data-act="del-act" data-id="' + a.id + '" data-pid="' + pr.id + '">Eliminar</button>' : '') + '</div></li>';
         }).join('') + '</ul>' : '<p class="has-text-grey is-size-7">Aún no hay actividades. Agrega la primera para medir el avance.</p>';
         return '<section class="fx-acts"><div class="fx-acts-head"><div><h4>Avance del proyecto</h4><span class="fx-acts-pct">' + real + '%</span></div>' +
-            '<button type="button" class="button is-small" data-act="add-act" data-pid="' + pr.id + '">Agregar actividad</button></div>' +
+            (CAN.editar ? '<button type="button" class="button is-small" data-act="add-act" data-pid="' + pr.id + '">Agregar actividad</button>' : '') + '</div>' +
             '<div class="fx-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + real + '"><span style="width:' + real + '%"></span></div>' +
             (declarado > 100 ? '<p class="fx-note danger" style="margin:.6rem 0 0" role="alert">Las actividades suman ' + declarado + '%, más del 100% del proyecto. Corrige los porcentajes.</p>' : '') + lista + '</section>';
     }
@@ -138,7 +138,7 @@
         var sumaPct = cuotas.reduce(function (s, c) { return s + c.pct; }, 0), pct = pctOf(cobrado, neto);
         return '<article class="fx-project" id="p-' + pr.id + '"><div class="fx-p-head"><div><h3>' + esc(pr.nombre) + '<span class="fx-badge b-' + slug(pr.estado) + '">' + esc(pr.estado) + '</span></h3>' +
             '<p class="fx-p-sub">' + pagadas + ' de ' + n + (n === 1 ? ' pago cobrado' : ' pagos cobrados') + ', ' + MON[pr.moneda].nombre.toLowerCase() + ' · ' +
-            '<button type="button" class="fx-link fx-p-actions" data-act="edit-plan" data-pid="' + pr.id + '">Editar plan de pagos</button></p></div>' +
+            (CAN.editar ? '<button type="button" class="fx-link fx-p-actions" data-act="edit-plan" data-pid="' + pr.id + '">Editar plan de pagos</button>' : '') + '</p></div>' +
             '<div class="fx-p-total"><strong>' + money(pr.monto, pr.moneda) + '</strong><span>monto total sin IGV</span></div></div>' +
             (Math.abs(sumaPct - 100) > 0.05 ? '<p class="fx-note">Los porcentajes de pago suman ' + fmtPct(sumaPct) + ' y no 100%. Revisa el contrato o completa los pagos que faltan.</p>' : '') +
             '<ol class="fx-cuotas">' + cuotas.map(function (c) { return renderCuota(pr, c); }).join('') + '</ol>' +
@@ -151,7 +151,7 @@
         var vis = D.proyectos.filter(coincide);
         renderKpis(vis);
         if (!D.proyectos.length) {
-            $('#contenido').html('<div class="fx-empty"><p class="mb-3">Aún no hay proyectos en el control de facturas.</p><button type="button" class="button is-primary" data-act="nuevo-plan">Agregar proyecto</button></div>');
+            $('#contenido').html('<div class="fx-empty"><p class="mb-3">Aún no hay proyectos en el control de facturas.</p>' + (CAN.editar ? '<button type="button" class="button is-primary" data-act="nuevo-plan">Agregar proyecto</button>' : '') + '</div>');
             return;
         }
         if (!vis.length) {
@@ -220,6 +220,14 @@
         }).join('') : '<li class="has-text-grey">Sin documentos adjuntos.</li>');
         $('#adjArchivo').val('');
     }
+    function pintarHistorial(id) {
+        $('#histLista').html('<li class="has-text-grey">Cargando…</li>');
+        $.getJSON(U.historial + '/' + id).done(function (r) {
+            $('#histLista').html(r.items.length ? r.items.map(function (h) {
+                return '<li><span>' + esc(h.resumen) + '<br><span class="has-text-grey is-size-7">' + esc(h.usuario_nombre || 'Sistema') + ' · ' + esc(String(h.created_at).slice(8, 10) + '/' + String(h.created_at).slice(5, 7) + '/' + String(h.created_at).slice(2, 4) + ' ' + String(h.created_at).slice(11, 16)) + '</span></span></li>';
+            }).join('') : '<li class="has-text-grey">Sin movimientos registrados.</li>');
+        }).fail(function () { $('#histLista').html('<li class="has-text-grey">No se pudo cargar el historial.</li>'); });
+    }
     function abrirCuota(pid, id) {
         var pr = byId(pid), c = pr && pr.cuotas.filter(function (x) { return x.id === Number(id); })[0];
         if (!c) { return; }
@@ -235,7 +243,13 @@
         }).join('')).val(c.hito_id || '');
         $('#detrHint').text('Detracción de este pago: ' + money(c.det, pr.moneda) + ' (' + D.detraccion + '% del total con IGV), depositada por el cliente en tu cuenta del Banco de la Nación.');
         $('#abFecha').val(D.hoy); $('#abRef').val('');
-        pintarAbonos(pr, c); pintarAdjuntos(c); showErr($fc, ''); syncPago(); open('#dlgCuota');
+        pintarAbonos(pr, c); pintarAdjuntos(c); pintarHistorial(c.id); showErr($fc, '');
+        // Los controles se ocultan según el perfil; el servidor valida lo mismo.
+        $('#grpAbonos .fx-abono-form, #grpAbonos [data-act=del-abono]').prop('hidden', !CAN.cobrar);
+        $('#grpAdj .fx-abono-form, #grpAdj [data-act=del-adj]').prop('hidden', !CAN.editar);
+        $fc.find('[name=estado][value=pagado]').prop('disabled', !CAN.cobrar);
+        $fc.find('[name=estado]').prop('disabled', function () { return !CAN.editar && !CAN.cobrar || (c.estado === 'pagado' && !CAN.cobrar) || (this.value === 'pagado' && !CAN.cobrar); });
+        $('#btnGuardarCuota').prop('hidden', !CAN.editar && !CAN.cobrar); syncPago(); open('#dlgCuota');
     }
     $fc.on('submit', function (e) {
         e.preventDefault(); showErr($fc, ''); $fc.find('.is-danger').removeClass('is-danger');
