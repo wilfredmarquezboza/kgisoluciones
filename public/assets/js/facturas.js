@@ -100,6 +100,7 @@
             '<span class="fx-status is-' + c.estado + '">' + ETQ[c.estado] + pago + '</span>' + flags +
             '<div class="fx-c-inv">' + (c.factura ? 'Factura <b>' + esc(c.factura) + '</b>' : 'Sin factura') + '</div>' +
             (fechas ? '<div class="fx-c-hint">' + fechas + '</div>' : '') +
+            (c.adjuntos.length ? '<div class="fx-c-hint"><i class="fa-solid fa-paperclip"></i> ' + c.adjuntos.length + (c.adjuntos.length === 1 ? ' documento' : ' documentos') + '</div>' : '') +
             (c.hito ? '<div class="fx-c-hint">Hito: ' + esc(c.hito) + (c.hito_estado === 'Concluido' ? ' ✓' : '') + '</div>' : '') + det +
             '<div class="fx-c-foot"><button type="button" class="button is-small" data-act="edit-cuota" data-id="' + c.id + '" data-pid="' + pr.id + '">Actualizar</button></div></li>';
     }
@@ -210,6 +211,15 @@
         }).join('') : '<li class="has-text-grey">Aún no hay abonos registrados.</li>');
         $('#abMonto').val(c.neto - cob > 0.005 ? r2(c.neto - cob) : '');
     }
+    var TIPOS = { factura_pdf: 'Factura (PDF)', factura_xml: 'Factura (XML)', constancia: 'Constancia', otro: 'Otro' };
+    function kb(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+    function pintarAdjuntos(c) {
+        $('#adjLista').html(c.adjuntos.length ? c.adjuntos.map(function (a) {
+            return '<li><span><i class="fa-solid fa-paperclip mr-1"></i><a href="' + U.adjunto + '/' + a.id + '">' + esc(a.nombre) + '</a> · ' + TIPOS[a.tipo] + ' · ' + kb(a.tamano) + '</span>' +
+                '<button type="button" class="fx-link danger" data-act="del-adj" data-id="' + a.id + '">Quitar</button></li>';
+        }).join('') : '<li class="has-text-grey">Sin documentos adjuntos.</li>');
+        $('#adjArchivo').val('');
+    }
     function abrirCuota(pid, id) {
         var pr = byId(pid), c = pr && pr.cuotas.filter(function (x) { return x.id === Number(id); })[0];
         if (!c) { return; }
@@ -225,7 +235,7 @@
         }).join('')).val(c.hito_id || '');
         $('#detrHint').text('Detracción de este pago: ' + money(c.det, pr.moneda) + ' (' + D.detraccion + '% del total con IGV), depositada por el cliente en tu cuenta del Banco de la Nación.');
         $('#abFecha').val(D.hoy); $('#abRef').val('');
-        pintarAbonos(pr, c); showErr($fc, ''); syncPago(); open('#dlgCuota');
+        pintarAbonos(pr, c); pintarAdjuntos(c); showErr($fc, ''); syncPago(); open('#dlgCuota');
     }
     $fc.on('submit', function (e) {
         e.preventDefault(); showErr($fc, ''); $fc.find('.is-danger').removeClass('is-danger');
@@ -240,6 +250,16 @@
         showErr($fc, '');
         $.post(U.abono + '/' + ctxCuota.id, { fecha: $('#abFecha').val(), monto: $('#abMonto').val(), ref: $('#abRef').val() })
             .done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo registrar el abono.'); });
+    });
+    $('#adjAdd').on('click', function () {
+        var f = $('#adjArchivo')[0].files[0]; showErr($fc, '');
+        if (!f) { return showErr($fc, 'Selecciona un archivo.'); }
+        var fd = new FormData(); fd.append('archivo', f); fd.append('tipo', $('#adjTipo').val());
+        $.ajax({ url: U.adjunto + '/' + ctxCuota.id, method: 'POST', data: fd, processData: false, contentType: false, dataType: 'json' })
+            .done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo subir el archivo.'); });
+    });
+    $(document).on('click', '[data-act=del-adj]', function () {
+        $.post(U.adjuntoDel + '/' + $(this).data('id')).done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo quitar el documento.'); });
     });
     $(document).on('click', '[data-act=del-abono]', function () {
         $.post(U.abonoDel + '/' + $(this).data('id')).done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo quitar el abono.'); });
@@ -315,6 +335,7 @@
         var $t = $(this), act = $t.data('act'), pid = $t.data('pid'), id = $t.data('id');
         switch (act) {
             case 'print': window.print(); break;
+            case 'avisos': $t.addClass('is-loading'); $.post(U.avisos).done(function (r) { toast(r.message); }).fail(function (x) { toast((x.responseJSON || {}).message || 'No se pudo enviar.', false); }).always(function () { $t.removeClass('is-loading'); }); break;
             case 'nuevo-plan': abrirPlan(null); break;
             case 'edit-plan': abrirPlan(pid); break;
             case 'edit-cuota': abrirCuota(pid, id); break;

@@ -19,11 +19,26 @@ class Mailer
             return false;
         }
 
+        // Cifrado: "ssl://host" o puerto 465 => SSL directo; si no, STARTTLS salvo SMTP_CRYPTO = none.
+        $port   = (int) ($cfg['SMTP_PORT'] ?? 465);
+        $crypto = strtolower(trim($cfg['SMTP_CRYPTO'] ?? ''));
+        if (stripos($host, 'ssl://') === 0) {
+            $host   = substr($host, 6);
+            $crypto = 'ssl';
+        } elseif (stripos($host, 'tls://') === 0) {
+            $host   = substr($host, 6);
+            $crypto = 'tls';
+        } elseif ($crypto === '') {
+            $crypto = $port === 465 ? 'ssl' : 'tls';
+        }
+        $crypto = $crypto === 'none' ? '' : $crypto;
+
         $email = service('email');
         $email->initialize([
             'protocol'   => 'smtp',
             'SMTPHost'   => $host,
-            'SMTPPort'   => (int) ($cfg['SMTP_PORT'] ?? 465),
+            'SMTPPort'   => $port,
+            'SMTPCrypto' => $crypto,
             'SMTPUser'   => $user,
             'SMTPPass'   => $cfg['SMTP_PASS'] ?? '',
             'SMTPTimeout' => 10,

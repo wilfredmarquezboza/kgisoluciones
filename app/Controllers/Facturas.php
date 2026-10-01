@@ -4,7 +4,9 @@ namespace App\Controllers;
 
 use App\Libraries\Facturacion;
 use App\Models\AbonoModel;
+use App\Libraries\Avisos;
 use App\Models\ActividadModel;
+use App\Models\AdjuntoModel;
 use App\Models\CuotaModel;
 use App\Models\ProyectoModel;
 
@@ -22,7 +24,7 @@ class Facturas extends BaseController
     public function datos()
     {
         $fx   = new Facturacion();
-        $rows = $this->proyectosFacturables();
+        $rows = $fx->proyectosFacturables();
         $info = $fx->armar($rows);
 
         $proyectos = array_map(static fn ($p) => [
@@ -99,6 +101,7 @@ class Facturas extends BaseController
         $conservar = array_filter(array_column($limpias, 'id'));
         $borrar    = array_diff($propias, $conservar);
         if ($borrar) {
+            (new AdjuntoModel())->purgarDeCuotas(array_values($borrar));
             (new AbonoModel())->whereIn('cuota_id', array_values($borrar))->delete();
             $cuotas->delete(array_values($borrar));
         }
@@ -125,6 +128,7 @@ class Facturas extends BaseController
         $db->transStart();
         $cuotaIds = array_column((new CuotaModel())->where('proyecto_id', $id)->findAll(), 'id');
         if ($cuotaIds) {
+            (new AdjuntoModel())->purgarDeCuotas($cuotaIds);
             (new AbonoModel())->whereIn('cuota_id', $cuotaIds)->delete();
         }
         (new CuotaModel())->where('proyecto_id', $id)->delete();
@@ -239,6 +243,124 @@ class Facturas extends BaseController
         return $this->response->setJSON(['ok' => true, 'message' => 'Abono eliminado.']);
     }
 
+    // ---------------- Adjuntos ----------------
+
+    public function adjuntar(int $cuotaId)
+    {
+        if (! (new CuotaModel())->find($cuotaId)) {
+            return $this->fail('El pago ya no existe.', 404);
+        }
+        $tipo = (string) $this->request->getPost('tipo');
+        if (! isset(AdjuntoModel::TIPOS[$tipo])) {
+            return $this->fail('Elige el tipo de documento.', 422);
+        }
+
+        $file = $this->request->getFile('archivo');
+        if (! $file || ! $file->isValid()) {
+            return $this->fail('Selecciona un archivo (máx. 5 MB).', 422);
+        }
+        $ok = $this->validate(['archivo' => 'uploaded[archivo]|max_size[archivo,5120]|ext_in[archivo,pdf,xml,jpg,jpeg,png]|mime_in[archivo,application/pdf,text/xml,application/xml,image/jpeg,image/png]']);
+        if (! $ok) {
+            return $this->fail('Solo se admiten PDF, XML, JPG o PNG de hasta 5 MB.', 422);
+        }
+
+        $dir = AdjuntoModel::dir();
+        if (! is_dir($dir)) {
+            mkdir($dir, 0750, true);
+        }
+        $guardado = bin2hex(random_bytes(16)) . '.' . strtolower($file->getExtension());
+        $nombre   = mb_substr(preg_replace('/[^\p{L}\p{N}._ ()-]+/u', '_', $file->getClientName()), 0, 150);
+        $tam      = $file->getSize();
+        $mime     = $file->getMimeType();
+        $file->move($dir, $guardado);
+
+        (new AdjuntoModel())->insert([
+            'cuota_id' => $cuotaId, 'tipo' => $tipo, 'nombre' => $nombre, 'archivo' => $guardado,
+            'mime' => $mime, 'tamano' => $tam, 'usuario_id' => usuario_actual()['id'] ?? null,
+        ]);
+
+        return $this->response->setJSON(['ok' => true, 'message' => 'Documento adjuntado.']);
+    }
+
+    /** Descarga protegida: los archivos viven fuera de public/ y siempre se envían como descarga. */
+    public function descargar(int $id)
+    {
+        $a = (new AdjuntoModel())->find($id);
+        $f = $a ? AdjuntoModel::dir() . $a['archivo'] : null;
+        if (! $a || ! is_file($f)) {
+            return $this->response->setStatusCode(404)->setBody('Archivo no encontrado.');
+        }
+
+        return $this->response->download($f, null)->setFileName($a['nombre'])->setHeader('X-Content-Type-Options', 'nosniff');
+    }
+
+    public function adjuntoEliminar(int $id)
+    {
+        $model = new AdjuntoModel();
+        $a     = $model->find($id);
+        if (! $a) {
+            return $this->fail('El documento ya no existe.', 404);
+        }
+        @unlink(AdjuntoModel::dir() . $a['archivo']);
+        $model->delete($id);
+
+        return $this->response->setJSON(['ok' => true, 'message' => 'Documento eliminado.']);
+    }
+
+    // ---------------- Avisos por correo ----------------
+
+    public function avisos()
+    {
+        [$ok, $msg] = (new Avisos())->enviar(false, true);
+
+        return $this->response->setStatusCode($ok ? 200 : 422)->setJSON(['ok' => $ok, 'message' => $msg]);
+    }
+
+    // ---------------- Flujo de caja ----------------
+
+    public function flujo()
+    {
+        return view('facturas/flujo', ['title' => 'Flujo de caja']);
+    }
+
+    public function flujoDatos()
+    {
+        $fx = new Facturacion();
+
+        return $this->response->setJSON([
+            'ok' => true, 'hoy' => date('Y-m-d'),
+            'flujo' => $fx->flujo((int) ($this->request->getGet('atras') ?? 3), (int) ($this->request->getGet('meses') ?? 12)),
+        ]);
+    }
+
+    public function flujoExportar()
+    {
+        $fx  = new Facturacion();
+        $out = fopen('php://temp', 'w+');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, ['Moneda', 'Tipo', 'Periodo', 'Fecha', 'Empresa', 'Proyecto', 'Pago', 'Monto', 'Detalle'], ';');
+        $f = static fn ($n) => number_format($n, 2, '.', '');
+        foreach ($fx->flujo((int) ($this->request->getGet('atras') ?? 3), (int) ($this->request->getGet('meses') ?? 12)) as $mon => $d) {
+            $emit = function ($tipo, $per, $items) use ($out, $mon, $f) {
+                foreach ($items as $it) {
+                    fputcsv($out, array_map([$this, 'csvSafe'], [$mon, $tipo, $per, $it['fecha'], $it['empresa'], $it['proyecto'], $it['pago'], $f($it['monto']), $it['detalle']]), ';');
+                }
+            };
+            foreach ($d['meses'] as $m) {
+                $emit('Cobrado', $m['mes'], $m['cobros']);
+                $emit('Esperado', $m['mes'], $m['prev']);
+            }
+            $emit('Esperado', 'Atrasado', $d['atrasado']['items']);
+            $emit('Esperado', 'Sin fecha', $d['sin_fecha']['items']);
+            $emit('Esperado', 'Posterior', $d['posterior']['items']);
+        }
+        rewind($out);
+        $csv = stream_get_contents($out);
+        fclose($out);
+
+        return $this->response->download('flujo-de-caja-' . date('Ymd') . '.csv', $csv);
+    }
+
     public function actividad(int $proyectoId)
     {
         if (! (new ProyectoModel())->find($proyectoId)) {
@@ -290,7 +412,7 @@ class Facturas extends BaseController
     public function exportar()
     {
         $fx   = new Facturacion();
-        $rows = $this->proyectosFacturables();
+        $rows = $fx->proyectosFacturables();
         $info = $fx->armar($rows);
 
         $out = fopen('php://temp', 'w+');
@@ -317,16 +439,6 @@ class Facturas extends BaseController
     }
 
     // ---------------------------------------------------------------
-
-    private function proyectosFacturables(): array
-    {
-        return db_connect()->table('proyectos')
-            ->select('proyectos.id, proyectos.nombre, proyectos.departamento, proyectos.moneda, proyectos.monto, clientes.nombre AS empresa')
-            ->join('clientes', 'clientes.id = proyectos.cliente_id', 'left')
-            ->where('proyectos.monto >', 0)
-            ->orderBy('clientes.nombre IS NULL', 'DESC', false)->orderBy('clientes.nombre')->orderBy('proyectos.id')
-            ->get()->getResultArray();
-    }
 
     /** @return array{0:float,1:float} neto del pago y suma de abonos registrados */
     private function netoYAbonado(array $cuota): array

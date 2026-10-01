@@ -27,6 +27,13 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->post('facturas/cuota/(:num)', 'Facturas::cuota/$1');
     $routes->post('facturas/abono/(:num)', 'Facturas::abono/$1');
     $routes->post('facturas/abono-eliminar/(:num)', 'Facturas::abonoEliminar/$1');
+    $routes->post('facturas/adjunto/(:num)', 'Facturas::adjuntar/$1');
+    $routes->get('facturas/adjunto/(:num)', 'Facturas::descargar/$1');
+    $routes->post('facturas/adjunto-eliminar/(:num)', 'Facturas::adjuntoEliminar/$1');
+    $routes->post('facturas/avisos', 'Facturas::avisos');
+    $routes->get('facturas/flujo', 'Facturas::flujo');
+    $routes->get('facturas/flujo-datos', 'Facturas::flujoDatos');
+    $routes->get('facturas/flujo-exportar', 'Facturas::flujoExportar');
     $routes->post('facturas/actividad/(:num)', 'Facturas::actividad/$1');
     $routes->post('facturas/actividad-eliminar/(:num)', 'Facturas::actividadEliminar/$1');
 

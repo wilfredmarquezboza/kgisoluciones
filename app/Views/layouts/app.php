@@ -1,6 +1,6 @@
 <?php
 $u    = usuario_actual();
-$seg  = service('uri')->getSegment(1);
+$path = trim(service('uri')->getPath(), '/');
 ?>
 <!doctype html>
 <html lang="es">
@@ -22,7 +22,7 @@ $seg  = service('uri')->getSegment(1);
 
     <p class="sidebar-label">GENERAL</p>
     <?php foreach (menu_items() as $grupo => [$icono, $items]):
-        $abierto = array_key_exists($seg, $items); ?>
+        $abierto = array_key_exists($path, $items); ?>
         <div class="menu-group <?= $abierto ? 'is-open' : '' ?>">
             <button type="button" class="menu-group-toggle" aria-expanded="<?= $abierto ? 'true' : 'false' ?>">
                 <span><i class="fa-solid <?= $icono ?>"></i><?= esc($grupo) ?></span>
@@ -30,7 +30,7 @@ $seg  = service('uri')->getSegment(1);
             </button>
             <ul class="menu-items">
                 <?php foreach ($items as $ruta => [$label, $ico]): ?>
-                    <li><a href="<?= site_url($ruta) ?>" class="<?= $seg === $ruta ? 'is-active' : '' ?>">
+                    <li><a href="<?= site_url($ruta) ?>" class="<?= $path === $ruta ? 'is-active' : '' ?>">
                         <i class="fa-solid <?= $ico ?>"></i><?= esc($label) ?></a></li>
                 <?php endforeach ?>
             </ul>

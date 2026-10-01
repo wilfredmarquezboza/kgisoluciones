@@ -28,6 +28,17 @@ class Facturacion
         return ['sub' => $sub, 'igv' => $igv, 'total' => $total, 'det' => $det, 'neto' => $total - $det];
     }
 
+    /** Proyectos con monto definido, agrupados por empresa (sin cliente primero). */
+    public function proyectosFacturables(): array
+    {
+        return db_connect()->table('proyectos')
+            ->select('proyectos.id, proyectos.nombre, proyectos.departamento, proyectos.moneda, proyectos.monto, clientes.nombre AS empresa')
+            ->join('clientes', 'clientes.id = proyectos.cliente_id', 'left')
+            ->where('proyectos.monto >', 0)
+            ->orderBy('clientes.nombre IS NULL', 'DESC', false)->orderBy('clientes.nombre')->orderBy('proyectos.id')
+            ->get()->getResultArray();
+    }
+
     /**
      * @param list<array{id:int|string,monto:float|string}> $proyectos
      * @return array<int,array<string,mixed>> por id de proyecto: cuotas, acts, avance, neto, cobrado, estado
@@ -54,6 +65,12 @@ class Facturacion
                 $abonos[$ab['cuota_id']][] = ['id' => (int) $ab['id'], 'fecha' => $ab['fecha'], 'monto' => (float) $ab['monto'], 'ref' => (string) $ab['referencia']];
             }
         }
+        $adjuntos = [];
+        if ($cuotasDb) {
+            foreach ($db->table('adjuntos')->whereIn('cuota_id', array_column($cuotasDb, 'id'))->orderBy('id')->get()->getResultArray() as $ad) {
+                $adjuntos[$ad['cuota_id']][] = ['id' => (int) $ad['id'], 'tipo' => $ad['tipo'], 'nombre' => $ad['nombre'], 'tamano' => (int) $ad['tamano']];
+            }
+        }
         $montos = array_column($proyectos, 'monto', 'id');
 
         foreach ($cuotasDb as $c) {
@@ -73,7 +90,7 @@ class Facturacion
                 'estimada' => (string) $c['fecha_estimada'], 'emision' => (string) $c['fecha_emision'], 'vencimiento' => (string) $c['fecha_vencimiento'],
                 'hito_id' => $c['actividad_id'] ? (int) $c['actividad_id'] : null, 'hito' => $hito['nombre'] ?? null, 'hito_estado' => $hito['estado'] ?? null,
                 'detr_fecha' => (string) $c['detr_fecha'], 'detr_ref' => (string) $c['detr_ref'],
-                'neto' => $neto, 'cobrado' => $cobr, 'saldo' => $pend ? $neto : max(0, $neto - $cobr), 'abonos' => $lista,
+                'adjuntos' => $adjuntos[$c['id']] ?? [], 'neto' => $neto, 'cobrado' => $cobr, 'saldo' => $pend ? $neto : max(0, $neto - $cobr), 'abonos' => $lista,
                 'listo' => $pend && $hito && $hito['estado'] === 'Concluido',
                 'vencida' => $venc,
                 'atraso' => $venc ? (int) ((strtotime($hoy) - strtotime($c['fecha_vencimiento'])) / 86400) : 0,
@@ -114,5 +131,73 @@ class Facturacion
         $v   = $row ? str_replace(',', '.', trim((string) $row['valor'])) : '';
 
         return is_numeric($v) && $v >= 0 && $v <= 100 ? (float) $v : $defecto;
+    }
+
+    /**
+     * Flujo de caja por moneda: cobros reales (abonos) y cobros esperados por mes.
+     * Esperado = saldo de cada pago en su vencimiento (o fecha estimada si aún no se factura).
+     * Lo esperado con fecha pasada va a "atrasado"; lo que no tiene fecha, a "sin_fecha".
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    public function flujo(int $atras = 3, int $meses = 12): array
+    {
+        $atras = max(0, min(12, $atras));
+        $meses = max(1, min(24, $meses));
+        $hoy   = date('Y-m-d');
+        $keys  = [];
+        for ($i = -$atras; $i < $meses; $i++) {
+            $keys[] = date('Y-m', strtotime(date('Y-m-01') . " $i month"));
+        }
+
+        $proyectos = $this->proyectosFacturables();
+        $info      = $this->armar($proyectos);
+        $vacio     = static fn () => ['total' => 0.0, 'items' => []];
+        $out       = [];
+
+        foreach ($proyectos as $p) {
+            $m = $p['moneda'];
+            if (! isset($out[$m])) {
+                $out[$m] = [
+                    'meses' => array_map(static fn ($k) => ['mes' => $k, 'proyectado' => 0.0, 'cobrado' => 0.0, 'prev' => [], 'cobros' => []], $keys),
+                    'atrasado' => $vacio(), 'sin_fecha' => $vacio(), 'posterior' => $vacio(),
+                ];
+            }
+            $base = ['empresa' => $p['empresa'] ?: 'Sin empresa asignada', 'proyecto' => $p['nombre'] ?: $p['departamento']];
+
+            foreach ($info[$p['id']]['cuotas'] as $c) {
+                $cobros = $c['abonos'] ?: ($c['estado'] === 'pagado' && $c['fecha'] ? [['fecha' => $c['fecha'], 'monto' => $c['neto'], 'ref' => $c['factura']]] : []);
+                foreach ($cobros as $ab) {
+                    $i = array_search(substr($ab['fecha'], 0, 7), $keys, true);
+                    if ($i !== false) {
+                        $out[$m]['meses'][$i]['cobrado'] += $ab['monto'];
+                        $out[$m]['meses'][$i]['cobros'][] = $base + ['pago' => $c['label'], 'fecha' => $ab['fecha'], 'monto' => $ab['monto'], 'detalle' => $ab['ref']];
+                    }
+                }
+
+                if ($c['saldo'] <= self::EPS) {
+                    continue;
+                }
+                $fecha = $c['estado'] === 'pendiente' ? $c['estimada'] : ($c['vencimiento'] ?: $c['estimada']);
+                $item  = $base + ['pago' => $c['label'], 'fecha' => $fecha, 'monto' => $c['saldo'], 'detalle' => $c['estado'] === 'pendiente' ? 'Por facturar' : 'Factura ' . $c['factura']];
+                $i     = $fecha ? array_search(substr($fecha, 0, 7), $keys, true) : false;
+
+                if (! $fecha) {
+                    $b = 'sin_fecha';
+                } elseif ($fecha < $hoy) {
+                    $b = 'atrasado';
+                } elseif ($i !== false) {
+                    $out[$m]['meses'][$i]['proyectado'] += $c['saldo'];
+                    $out[$m]['meses'][$i]['prev'][] = $item;
+                    continue;
+                } else {
+                    $b = 'posterior';
+                }
+                $out[$m][$b]['total'] += $c['saldo'];
+                $out[$m][$b]['items'][] = $item;
+            }
+        }
+
+        return $out;
     }
 }

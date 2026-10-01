@@ -242,3 +242,25 @@ body.auth { background: #fff; }
 .fx-abono-form .column { padding-top: .2rem; padding-bottom: .2rem; }
 .fx-c-det { font-size: .75rem; color: #6b7285; } .fx-c-det.pend { color: #7c5200; font-weight: 700; }
 @media (max-width: 560px) { .fx-radios { grid-template-columns: 1fr; } }
+
+/* ---------- Flujo de caja ---------- */
+.fx-mon { margin-bottom: 2.2rem; }
+.fx-mon-h { font-size: 1.15rem; font-weight: 700; margin: 0 0 .7rem; color: #20242f; }
+.fx-flujo-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; margin-bottom: 1rem; }
+.fx-flujo-kpis .fx-kpi-n { font-size: 1.4rem; } .fx-kpi-n.late { color: #a2382a; }
+.fx-flujo-card { padding: 1rem 1rem .4rem; }
+.fx-legend-row { display: flex; gap: 1.2rem; font-size: .85rem; margin-bottom: .4rem; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: .35rem; vertical-align: -1px; }
+.fx-s-esp { --c: #2a78d6; fill: #2a78d6; background: #2a78d6; }
+.fx-s-cob { --c: #1baf7a; fill: #1baf7a; background: #1baf7a; }
+.fx-chart-scroll { overflow-x: auto; }
+.fx-chart-scroll svg { display: block; max-width: none; }
+.fx-grid { stroke: #e6e9ec; stroke-width: 1; } .fx-base { stroke: #9aa3ad; stroke-width: 1; }
+.fx-axis { font-size: 11px; fill: #6b7285; } .fx-axis.fx-late { fill: #a2382a; font-weight: 700; }
+.fx-hit { fill: transparent; cursor: pointer; } .fx-col:hover .fx-hit, .fx-col.is-sel .fx-hit { fill: rgba(42, 120, 214, .07); }
+.fx-now { fill: none; stroke: #c5ccd3; stroke-dasharray: 3 3; } .fx-col.is-sel .fx-axis { font-weight: 700; fill: #20242f; }
+.fx-flujo-table tbody tr { cursor: pointer; } .fx-flujo-table tbody tr:hover, .fx-flujo-table tr.is-sel { background: #eef4fb; }
+.fx-flujo-table td { font-variant-numeric: tabular-nums; }
+.fx-det { min-height: 120px; } .fx-det-h { font-weight: 700; margin-bottom: .4rem; } .fx-det-s { font-size: .75rem; font-weight: 700; color: #6b7285; margin: .5rem 0 .2rem; text-transform: uppercase; }
+.fx-tip { position: fixed; z-index: 120; background: #20242f; color: #fff; padding: .5rem .7rem; border-radius: 6px; font-size: .8rem; line-height: 1.5; pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+@media print { .fx-tip { display: none !important; } .fx-toolbar select, .fx-toolbar .select { display: none; } }

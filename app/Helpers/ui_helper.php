@@ -9,6 +9,7 @@ function menu_items(): array
             'clientes'  => ['Clientes', 'fa-building'],
             'procesos'  => ['Procesos', 'fa-list-check'],
             'facturas'  => ['Control de facturas', 'fa-file-invoice-dollar'],
+            'facturas/flujo' => ['Flujo de caja', 'fa-chart-column'],
         ]],
         'Seguridad' => ['fa-shield-halved', [
             'configuraciones' => ['Configuración', 'fa-gear'],
