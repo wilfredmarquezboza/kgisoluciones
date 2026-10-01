@@ -21,7 +21,7 @@
         </div>
     </section>
 </div>
-<script src="<?= base_url('assets/vendor/jquery.min.js') ?>"></script>
+<script src="<?= base_url('assets/lib/jquery.min.js') ?>"></script>
 <script src="<?= base_url('assets/js/auth.js') ?>"></script>
 </body>
 </html>

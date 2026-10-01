@@ -74,7 +74,7 @@ foreach (menu_permitido() as [, $its]) {
 </div>
 
 <div id="toasts" class="toasts"></div>
-<script src="<?= base_url('assets/vendor/jquery.min.js') ?>"></script>
+<script src="<?= base_url('assets/lib/jquery.min.js') ?>"></script>
 <script src="<?= base_url('assets/js/app.js') ?>"></script>
 <?php foreach (['success' => true, 'error' => false] as $k => $ok): if ($m = session()->getFlashdata($k)): ?>
 <script>window.toast && toast(<?= json_encode($m) ?>, <?= $ok ? 'true' : 'false' ?>);</script>
