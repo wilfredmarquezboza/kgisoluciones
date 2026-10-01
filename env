@@ -1,0 +1,17 @@
+#--------------------------------------------------------------------
+# Copia este archivo a ".env" y ajusta los valores.
+#--------------------------------------------------------------------
+CI_ENVIRONMENT = development
+
+app.baseURL = 'http://localhost:8080/'
+
+database.default.hostname = localhost
+database.default.database = kgisoluciones
+database.default.username = root
+database.default.password =
+database.default.DBDriver = MySQLi
+database.default.port = 3306
+
+# Usuario administrador inicial (solo lo usa el seeder)
+ADMIN_EMAIL = admin@kgisoluciones.com
+ADMIN_PASSWORD = Admin123!
