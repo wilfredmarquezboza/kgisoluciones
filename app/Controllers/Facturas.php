@@ -2,8 +2,9 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Facturacion;
+use App\Models\AbonoModel;
 use App\Models\ActividadModel;
-use App\Models\ConfiguracionModel;
 use App\Models\CuotaModel;
 use App\Models\ProyectoModel;
 
@@ -20,24 +21,9 @@ class Facturas extends BaseController
     /** Todo lo que la pantalla necesita; se vuelve a pedir tras cada cambio. */
     public function datos()
     {
+        $fx   = new Facturacion();
         $rows = $this->proyectosFacturables();
-        $ids  = array_column($rows, 'id');
-
-        $cuotas = $acts = [];
-        if ($ids) {
-            foreach ((new CuotaModel())->whereIn('proyecto_id', $ids)->orderBy('orden')->orderBy('id')->findAll() as $c) {
-                $cuotas[$c['proyecto_id']][] = [
-                    'id' => (int) $c['id'], 'label' => $c['etiqueta'], 'pct' => (float) $c['porcentaje'],
-                    'estado' => $c['estado'], 'factura' => (string) $c['factura'], 'fecha' => (string) $c['fecha_pago'],
-                ];
-            }
-            foreach ((new ActividadModel())->whereIn('proyecto_id', $ids)->orderBy('fecha')->orderBy('id')->findAll() as $a) {
-                $acts[$a['proyecto_id']][] = [
-                    'id' => (int) $a['id'], 'nombre' => $a['nombre'], 'fecha' => (string) $a['fecha'],
-                    'estado' => $a['estado'], 'pct' => (int) $a['porcentaje'],
-                ];
-            }
-        }
+        $info = $fx->armar($rows);
 
         $proyectos = array_map(static fn ($p) => [
             'id'      => (int) $p['id'],
@@ -45,17 +31,16 @@ class Facturas extends BaseController
             'empresa' => $p['empresa'] ?: 'Sin empresa asignada',
             'moneda'  => $p['moneda'],
             'monto'   => (float) $p['monto'],
-            'cuotas'  => $cuotas[$p['id']] ?? [],
-            'acts'    => $acts[$p['id']] ?? [],
-        ], $rows);
+        ] + $info[$p['id']], $rows);
 
         $disponibles = db_connect()->table('proyectos')->select('id, departamento, nombre')
             ->groupStart()->where('monto', null)->orWhere('monto', 0)->groupEnd()->orderBy('departamento')->orderBy('nombre')->get()->getResultArray();
 
         return $this->response->setJSON([
             'ok'          => true,
-            'igv'         => $this->tasa('IGV', 18),
-            'detraccion'  => $this->tasa('DETRACCION', 12),
+            'igv'         => $fx->igv,
+            'detraccion'  => $fx->detraccion,
+            'hoy'         => date('Y-m-d'),
             'proyectos'   => $proyectos,
             'disponibles' => array_map(static fn ($d) => ['id' => (int) $d['id'], 'label' => ($d['nombre'] ?: '(Sin nombre)') . ' · ' . $d['departamento']], $disponibles),
         ]);
@@ -114,6 +99,7 @@ class Facturas extends BaseController
         $conservar = array_filter(array_column($limpias, 'id'));
         $borrar    = array_diff($propias, $conservar);
         if ($borrar) {
+            (new AbonoModel())->whereIn('cuota_id', array_values($borrar))->delete();
             $cuotas->delete(array_values($borrar));
         }
         foreach ($limpias as $c) {
@@ -137,6 +123,10 @@ class Facturas extends BaseController
         }
         $db = db_connect();
         $db->transStart();
+        $cuotaIds = array_column((new CuotaModel())->where('proyecto_id', $id)->findAll(), 'id');
+        if ($cuotaIds) {
+            (new AbonoModel())->whereIn('cuota_id', $cuotaIds)->delete();
+        }
         (new CuotaModel())->where('proyecto_id', $id)->delete();
         (new ActividadModel())->where('proyecto_id', $id)->delete();
         $proyectos->update($id, ['moneda' => null, 'monto' => null]);
@@ -153,30 +143,100 @@ class Facturas extends BaseController
             return $this->fail('El pago ya no existe.', 404);
         }
 
-        $estado  = (string) $this->request->getPost('estado');
-        $factura = trim((string) $this->request->getPost('factura'));
-        $fecha   = trim((string) $this->request->getPost('fecha'));
+        $post    = $this->request->getPost();
+        $estado  = (string) ($post['estado'] ?? '');
+        $factura = trim((string) ($post['factura'] ?? ''));
+        $ref     = trim((string) ($post['detr_ref'] ?? ''));
+        $hito    = (int) ($post['actividad_id'] ?? 0);
 
         if (! in_array($estado, CuotaModel::ESTADOS, true)) {
             return $this->fail('Estado no válido.', 422);
         }
-        if (mb_strlen($factura) > 30) {
-            return $this->fail('El N° de factura admite hasta 30 caracteres.', 422);
+        if (mb_strlen($factura) > 30 || mb_strlen($ref) > 40) {
+            return $this->fail('El N° de factura admite hasta 30 caracteres y la constancia hasta 40.', 422);
         }
         if ($estado === 'facturado' && $factura === '') {
             return $this->fail('Escribe el N° de factura para marcar el pago como facturado.', 422, 'factura');
         }
-        if ($estado === 'pagado' && $fecha !== '' && ! $this->fechaValida($fecha)) {
-            return $this->fail('La fecha de pago no es válida.', 422, 'fecha');
+
+        $f = [];
+        foreach (['fecha' => 'fecha de pago', 'estimada' => 'fecha estimada', 'emision' => 'fecha de emisión', 'vencimiento' => 'fecha de vencimiento', 'detr_fecha' => 'fecha de la detracción'] as $k => $label) {
+            $v = trim((string) ($post[$k] ?? ''));
+            if ($v !== '' && ! $this->fechaValida($v)) {
+                return $this->fail("La $label no es válida.", 422, $k);
+            }
+            $f[$k] = $v === '' ? null : $v;
+        }
+        if ($f['emision'] && $f['vencimiento'] && $f['vencimiento'] < $f['emision']) {
+            return $this->fail('El vencimiento no puede ser anterior a la emisión.', 422, 'vencimiento');
+        }
+        if ($hito && (new ActividadModel())->where('id', $hito)->where('proyecto_id', $c['proyecto_id'])->countAllResults() === 0) {
+            return $this->fail('El hito no pertenece a este proyecto.', 422, 'actividad_id');
         }
 
+        $facturado = $estado !== 'pendiente';   // sin factura no hay emisión, vencimiento ni detracción
         $model->update($id, [
-            'estado'     => $estado,
-            'factura'    => $factura === '' ? null : $factura,
-            'fecha_pago' => $estado === 'pagado' && $fecha !== '' ? $fecha : null,
+            'estado'            => $estado,
+            'factura'           => $facturado && $factura !== '' ? $factura : null,
+            'fecha_pago'        => $estado === 'pagado' ? $f['fecha'] : null,
+            'actividad_id'      => $hito ?: null,
+            'fecha_estimada'    => $f['estimada'],
+            'fecha_emision'     => $facturado ? $f['emision'] : null,
+            'fecha_vencimiento' => $facturado ? $f['vencimiento'] : null,
+            'detr_fecha'        => $facturado ? $f['detr_fecha'] : null,
+            'detr_ref'          => $facturado && $ref !== '' ? $ref : null,
         ]);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Pago actualizado.']);
+    }
+
+    /** Registra un cobro (puede ser parcial). Si cubre el neto, el pago pasa a pagado. */
+    public function abono(int $cuotaId)
+    {
+        $cuota = (new CuotaModel())->find($cuotaId);
+        if (! $cuota) {
+            return $this->fail('El pago ya no existe.', 404);
+        }
+        if ($cuota['estado'] === 'pendiente') {
+            return $this->fail('Primero marca el pago como facturado.', 422);
+        }
+
+        $fecha = trim((string) $this->request->getPost('fecha'));
+        $monto = $this->request->getPost('monto');
+        $ref   = trim((string) $this->request->getPost('ref'));
+        if (! $this->fechaValida($fecha)) {
+            return $this->fail('Indica la fecha del abono.', 422, 'fecha');
+        }
+        if (! is_numeric($monto) || (float) $monto <= 0) {
+            return $this->fail('El monto del abono debe ser mayor que cero.', 422, 'monto');
+        }
+        if (mb_strlen($ref) > 60) {
+            return $this->fail('La referencia admite hasta 60 caracteres.', 422, 'ref');
+        }
+
+        [$neto, $suma] = $this->netoYAbonado($cuota);
+        $monto         = round((float) $monto, 2);
+        if ($monto > $neto - $suma + Facturacion::EPS) {
+            return $this->fail('El abono supera el saldo del pago (' . number_format(max(0, $neto - $suma), 2) . ').', 422, 'monto');
+        }
+
+        (new AbonoModel())->insert(['cuota_id' => $cuotaId, 'fecha' => $fecha, 'monto' => $monto, 'referencia' => $ref ?: null]);
+        $this->sincronizar($cuotaId);
+
+        return $this->response->setJSON(['ok' => true, 'message' => 'Abono registrado.']);
+    }
+
+    public function abonoEliminar(int $id)
+    {
+        $model = new AbonoModel();
+        $ab    = $model->find($id);
+        if (! $ab) {
+            return $this->fail('El abono ya no existe.', 404);
+        }
+        $model->delete($id);
+        $this->sincronizar((int) $ab['cuota_id']);
+
+        return $this->response->setJSON(['ok' => true, 'message' => 'Abono eliminado.']);
     }
 
     public function actividad(int $proyectoId)
@@ -220,6 +280,7 @@ class Facturas extends BaseController
         if (! $model->find($id)) {
             return $this->fail('La actividad ya no existe.', 404);
         }
+        (new CuotaModel())->where('actividad_id', $id)->set(['actividad_id' => null])->update();
         $model->delete($id);
 
         return $this->response->setJSON(['ok' => true, 'message' => 'Actividad eliminada.']);
@@ -228,28 +289,25 @@ class Facturas extends BaseController
     /** CSV (UTF-8 con BOM, para Excel) con el detalle de todos los pagos. */
     public function exportar()
     {
-        $igv = $this->tasa('IGV', 18) / 100;
-        $det = $this->tasa('DETRACCION', 12) / 100;
+        $fx   = new Facturacion();
+        $rows = $this->proyectosFacturables();
+        $info = $fx->armar($rows);
 
         $out = fopen('php://temp', 'w+');
         fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, ['Empresa', 'Proyecto', 'Moneda', 'Monto sin IGV', 'Pago', '%', 'Subtotal', 'IGV', 'Total con IGV', 'Detracción', 'Neto a cobrar', 'Estado', 'Factura', 'Fecha de pago'], ';');
+        fputcsv($out, ['Empresa', 'Proyecto', 'Moneda', 'Monto sin IGV', 'Pago', '%', 'Subtotal', 'IGV', 'Total con IGV', 'Detracción', 'Neto a cobrar',
+            'Cobrado', 'Saldo', 'Estado', 'Factura', 'Emisión', 'Vencimiento', 'Días de atraso', 'Fecha de pago', 'Detracción depositada', 'Constancia', 'Hito'], ';');
 
-        $pagos = db_connect()->table('cuotas')
-            ->select('clientes.nombre AS empresa, proyectos.nombre AS proyecto, proyectos.departamento, proyectos.moneda, proyectos.monto, cuotas.*')
-            ->join('proyectos', 'proyectos.id = cuotas.proyecto_id')->join('clientes', 'clientes.id = proyectos.cliente_id', 'left')
-            ->orderBy('empresa')->orderBy('proyectos.id')->orderBy('cuotas.orden')->get()->getResultArray();
-
-        foreach ($pagos as $r) {
-            $sub   = (float) $r['monto'] * (float) $r['porcentaje'] / 100;
-            $total = $sub * (1 + $igv);
-            $d     = $total * $det;
-            fputcsv($out, array_map([$this, 'csvSafe'], [
-                $r['empresa'] ?: 'Sin empresa asignada', $r['proyecto'] ?: $r['departamento'], $r['moneda'], number_format((float) $r['monto'], 2, '.', ''),
-                $r['etiqueta'], (float) $r['porcentaje'], number_format($sub, 2, '.', ''), number_format($sub * $igv, 2, '.', ''),
-                number_format($total, 2, '.', ''), number_format($d, 2, '.', ''), number_format($total - $d, 2, '.', ''),
-                $r['estado'], $r['factura'], $r['fecha_pago'],
-            ]), ';');
+        foreach ($rows as $p) {
+            foreach ($info[$p['id']]['cuotas'] as $c) {
+                $f = static fn ($n) => number_format($n, 2, '.', '');
+                fputcsv($out, array_map([$this, 'csvSafe'], [
+                    $p['empresa'] ?: 'Sin empresa asignada', $p['nombre'] ?: $p['departamento'], $p['moneda'], $f((float) $p['monto']),
+                    $c['label'], $c['pct'], $f($c['sub']), $f($c['igv']), $f($c['total']), $f($c['det']), $f($c['neto']),
+                    $f($c['cobrado']), $f($c['saldo']), $c['estado'], $c['factura'], $c['emision'], $c['vencimiento'], $c['atraso'] ?: '',
+                    $c['fecha'], $c['detr_fecha'], $c['detr_ref'], $c['hito'],
+                ]), ';');
+            }
         }
         rewind($out);
         $csv = stream_get_contents($out);
@@ -270,12 +328,29 @@ class Facturas extends BaseController
             ->get()->getResultArray();
     }
 
-    private function tasa(string $clave, float $defecto): float
+    /** @return array{0:float,1:float} neto del pago y suma de abonos registrados */
+    private function netoYAbonado(array $cuota): array
     {
-        $row = (new ConfiguracionModel())->where('clave', $clave)->first();
-        $v   = $row ? str_replace(',', '.', trim((string) $row['valor'])) : '';
+        $p    = (new ProyectoModel())->find($cuota['proyecto_id']);
+        $neto = (new Facturacion())->calc((float) $p['monto'], (float) $cuota['porcentaje'])['neto'];
+        $row  = db_connect()->table('abonos')->selectSum('monto', 'suma')->where('cuota_id', $cuota['id'])->get()->getRowArray();
 
-        return is_numeric($v) && $v >= 0 && $v <= 100 ? (float) $v : $defecto;
+        return [$neto, (float) ($row['suma'] ?? 0)];
+    }
+
+    /** Mantiene el estado coherente con los abonos: cubierto → pagado; si deja de estarlo → facturado. */
+    private function sincronizar(int $cuotaId): void
+    {
+        $model = new CuotaModel();
+        $cuota = $model->find($cuotaId);
+        [$neto, $suma] = $this->netoYAbonado($cuota);
+
+        if ($suma >= $neto - Facturacion::EPS && $suma > 0) {
+            $ultimo = db_connect()->table('abonos')->selectMax('fecha', 'f')->where('cuota_id', $cuotaId)->get()->getRowArray();
+            $model->update($cuotaId, ['estado' => 'pagado', 'fecha_pago' => $ultimo['f']]);
+        } elseif ($cuota['estado'] === 'pagado') {
+            $model->update($cuotaId, ['estado' => 'facturado', 'fecha_pago' => null]);
+        }
     }
 
     private function fechaValida(string $f): bool

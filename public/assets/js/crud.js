@@ -19,6 +19,13 @@
             case 'tag': return '<span class="tag is-light">' + esc(v) + '</span>';
             case 'estado': return Number(v) ? '<span class="tag is-active-ok">Activo</span>' : '<span class="tag is-off">Inactivo</span>';
             case 'avatar': return '<span class="row-avatar"><span class="avatar">' + esc(initials(v)) + '</span>' + esc(v) + '</span>';
+            case 'bar':
+                if (v == null) { return '<span class="has-text-grey-light">—</span>'; }
+                return '<span class="mini-bar"><span class="mini-track"><span style="width:' + Math.min(100, v) + '%"></span></span><b>' + Math.round(v) + '%</b></span>';
+            case 'money':
+                return v == null ? '<span class="has-text-grey-light">—</span>' : (row.moneda === 'PEN' ? 'S/ ' : 'US$ ') + Number(v).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            case 'seguimiento':
+                return v ? '<span class="tag seg-' + String(v).toLowerCase().normalize('NFD').replace(/[^a-z]+/g, '-') + '">' + esc(v) + '</span>' : '<span class="has-text-grey-light">—</span>';
             default: return esc(v);
         }
     }
@@ -53,7 +60,7 @@
         }
         state.rows.forEach(function (row, i) {
             var tr = '<tr><td class="is-center">' + ((state.page - 1) * state.per + i + 1) + '</td>';
-            cfg.columns.forEach(function (c) { tr += '<td>' + cell(c, row) + '</td>'; });
+            cfg.columns.forEach(function (c) { tr += '<td' + (c.key === 'nombre' && cfg.columns.length > 4 ? ' style="min-width:260px"' : '') + '>' + cell(c, row) + '</td>'; });
             tr += '<td class="is-center"><span class="row-actions">' +
                 '<button class="btn-icon is-edit" data-id="' + row.id + '" title="Editar"><i class="fa-solid fa-pen"></i></button>' +
                 '<button class="btn-icon is-del" data-id="' + row.id + '" title="Eliminar"><i class="fa-solid fa-trash"></i></button></span></td></tr>';

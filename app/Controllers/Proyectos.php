@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\Facturacion;
 use App\Models\ClienteModel;
 use App\Models\ProyectoModel;
 use CodeIgniter\Database\BaseBuilder;
@@ -37,7 +38,30 @@ class Proyectos extends CrudController
             ['key' => 'departamento', 'label' => 'Departamento', 'sortable' => true],
             ['key' => 'nombre', 'label' => 'Proyecto', 'sortable' => true],
             ['key' => 'cliente', 'label' => 'Cliente', 'sortable' => true],
+            ['key' => 'avance', 'label' => 'Avance', 'type' => 'bar'],
+            ['key' => 'cobrado_pct', 'label' => 'Cobrado', 'type' => 'bar'],
+            ['key' => 'saldo', 'label' => 'Saldo por cobrar', 'type' => 'money'],
+            ['key' => 'estado_fact', 'label' => 'Seguimiento', 'type' => 'seguimiento'],
         ];
+    }
+
+    /** Agrega avance, % cobrado, saldo y estado de seguimiento a los proyectos que tienen monto. */
+    public function listar()
+    {
+        $res  = parent::listar();
+        $body = json_decode($res->getBody(), true);
+        $con  = array_values(array_filter($body['data'], static fn ($r) => (float) $r['monto'] > 0));
+        $info = $con ? (new Facturacion())->armar($con) : [];
+
+        foreach ($body['data'] as &$r) {
+            $i = $info[$r['id']] ?? null;
+            $r['avance']      = $i ? $i['avance'] : null;
+            $r['cobrado_pct'] = $i && $i['neto'] > 0 ? round($i['cobrado'] / $i['neto'] * 100, 1) : null;
+            $r['saldo']       = $i ? round($i['neto'] - $i['cobrado'], 2) : null;
+            $r['estado_fact'] = $i ? $i['estado'] : null;
+        }
+
+        return $res->setJSON($body);
     }
 
     protected function fields(): array

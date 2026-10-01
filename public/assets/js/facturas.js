@@ -6,6 +6,7 @@
     var D = { proyectos: [], disponibles: [], igv: 18, detraccion: 12 };
     var S = { empresa: '__all__', estado: '__all__', q: '', abiertos: {} };
     var MON = { USD: { sim: 'US$', nombre: 'Dólares' }, PEN: { sim: 'S/', nombre: 'Soles' } };
+    var FECHA_HOY = '';
     var ETQ = { pendiente: '○ Pendiente', facturado: '◐ Facturado', pagado: '✓ Pagado' };
 
     /* ---------- utilidades ---------- */
@@ -20,21 +21,25 @@
     function pctOf(a, b) { return b > 0 ? a / b * 100 : 0; }
     function fmtFecha(iso) { return /^\d{4}-\d{2}-\d{2}/.test(iso || '') ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(2, 4) : ''; }
 
-    function calc(monto, pct) {
-        var sub = monto * pct / 100, igv = sub * D.igv / 100, total = sub + igv, det = total * D.detraccion / 100;
-        return { sub: sub, igv: igv, total: total, det: det, neto: total - det };
-    }
-    function cuotasDe(pr) { return pr.cuotas.map(function (c) { return $.extend({}, c, calc(pr.monto, c.pct)); }); }
+    function cuotasDe(pr) { return pr.cuotas; }   // importes, cobrado y banderas vienen calculados del servidor
     function resumen(lista) {
         var out = {};
-        Object.keys(MON).forEach(function (m) { out[m] = { neto: 0, pagado: 0, facturado: 0, pendiente: 0 }; });
-        lista.forEach(function (pr) { cuotasDe(pr).forEach(function (c) { out[pr.moneda].neto += c.neto; out[pr.moneda][c.estado] += c.neto; }); });
+        Object.keys(MON).forEach(function (m) { out[m] = { neto: 0, pagado: 0, facturado: 0, pendiente: 0, vencido: 0, detr: 0 }; });
+        lista.forEach(function (pr) {
+            cuotasDe(pr).forEach(function (c) {
+                var o = out[pr.moneda];
+                o.neto += c.neto; o.pagado += c.cobrado;
+                if (c.estado === 'pendiente') { o.pendiente += c.neto; } else { o.facturado += c.neto - c.cobrado; }
+                if (c.vencida) { o.vencido += c.saldo; }
+                if (c.detr_pend) { o.detr += c.det; }
+            });
+        });
         return out;
     }
     function coincide(pr) {
         if (S.empresa !== '__all__' && pr.empresa !== S.empresa) { return false; }
         var cuotas = cuotasDe(pr);
-        if (S.estado !== '__all__' && !cuotas.some(function (c) { return c.estado === S.estado; })) { return false; }
+        if (S.estado !== '__all__' && !cuotas.some(function (c) { return S.estado === 'listo' ? c.listo : S.estado === 'vencida' ? c.vencida : c.estado === S.estado; })) { return false; }
         if (S.q) {
             var hay = norm([pr.nombre, pr.empresa].concat(cuotas.map(function (c) { return c.factura; })).join(' '));
             if (hay.indexOf(norm(S.q)) < 0) { return false; }
@@ -55,6 +60,14 @@
         }).join(''));
     }
 
+    function renderAlertas() {
+        var venc = 0, listo = 0;
+        D.proyectos.forEach(function (p) { p.cuotas.forEach(function (c) { if (c.vencida) { venc++; } if (c.listo) { listo++; } }); });
+        $('#alertas').html(
+            (venc ? '<button type="button" class="fx-alerta danger" data-act="filtro-estado" data-v="vencida"><i class="fa-solid fa-triangle-exclamation mr-1"></i>' + venc + (venc === 1 ? ' pago vencido' : ' pagos vencidos') + '</button>' : '') +
+            (listo ? '<button type="button" class="fx-alerta warn" data-act="filtro-estado" data-v="listo"><i class="fa-solid fa-file-invoice mr-1"></i>' + listo + (listo === 1 ? ' pago listo para facturar' : ' pagos listos para facturar') + '</button>' : ''));
+    }
+
     function renderKpis(lista) {
         var r = resumen(lista), filtrado = lista.length !== D.proyectos.length;
         $('#kpis').html(Object.keys(MON).filter(function (m) { return r[m].neto > 0; }).map(function (m) {
@@ -64,16 +77,30 @@
                 '<div class="fx-stack">' + filas.map(function (f) { return '<span class="' + f[0] + '" style="width:' + pctOf(f[2], o.neto).toFixed(2) + '%"></span>'; }).join('') + '</div>' +
                 '<ul class="fx-legend">' + filas.map(function (f) {
                     return '<li><i class="sw ' + f[0] + '"></i><span>' + f[1] + '</span><b>' + money(f[2], m) + '</b><span class="pct">' + fmtPct(pctOf(f[2], o.neto)) + '</span></li>';
-                }).join('') + '</ul></article>';
+                }).join('') + '</ul>' +
+                ((o.vencido > 0 || o.detr > 0) ? '<div class="fx-kpi-extra">' +
+                    (o.vencido > 0 ? '<span class="danger">Vencido: ' + money(o.vencido, m) + '</span>' : '') +
+                    (o.detr > 0 ? '<span class="muted">Detracción por depositar: ' + money(o.detr, m) + '</span>' : '') + '</div>' : '') + '</article>';
         }).join(''));
     }
 
     function renderCuota(pr, c) {
         var pago = c.estado === 'pagado' && c.fecha ? ' el ' + fmtFecha(c.fecha) : '';
+        var flags = (c.listo ? '<span class="fx-flag listo">Listo para facturar</span>' : '') +
+            (c.vencida ? '<span class="fx-flag vencida">Vencida hace ' + c.atraso + (c.atraso === 1 ? ' día' : ' días') + '</span>' : '') +
+            (c.parcial ? '<span class="fx-flag parcial">Cobrado ' + money(c.cobrado, pr.moneda) + '</span>' : '');
+        var fechas = c.estado === 'pendiente'
+            ? (c.estimada ? 'Estimado ' + fmtFecha(c.estimada) : '')
+            : [c.emision ? 'Emitida ' + fmtFecha(c.emision) : '', c.vencimiento ? 'Vence ' + fmtFecha(c.vencimiento) : ''].filter(Boolean).join(' · ');
+        var det = c.estado === 'pendiente' ? '' : (c.detr_fecha
+            ? '<div class="fx-c-det">Detracción ' + money(c.det, pr.moneda) + ' depositada ' + fmtFecha(c.detr_fecha) + '</div>'
+            : '<div class="fx-c-det pend">Detracción ' + money(c.det, pr.moneda) + ' por depositar</div>');
         return '<li class="fx-cuota is-' + c.estado + '"><div class="fx-c-top"><b>' + esc(c.label) + '</b><span>' + fmtPct(c.pct) + '</span></div>' +
             '<div class="fx-c-amount">' + money(c.neto, pr.moneda) + '</div><div class="fx-c-hint">neto a cobrar</div>' +
-            '<span class="fx-status is-' + c.estado + '">' + ETQ[c.estado] + pago + '</span>' +
+            '<span class="fx-status is-' + c.estado + '">' + ETQ[c.estado] + pago + '</span>' + flags +
             '<div class="fx-c-inv">' + (c.factura ? 'Factura <b>' + esc(c.factura) + '</b>' : 'Sin factura') + '</div>' +
+            (fechas ? '<div class="fx-c-hint">' + fechas + '</div>' : '') +
+            (c.hito ? '<div class="fx-c-hint">Hito: ' + esc(c.hito) + (c.hito_estado === 'Concluido' ? ' ✓' : '') + '</div>' : '') + det +
             '<div class="fx-c-foot"><button type="button" class="button is-small" data-act="edit-cuota" data-id="' + c.id + '" data-pid="' + pr.id + '">Actualizar</button></div></li>';
     }
 
@@ -108,7 +135,7 @@
         var cobrado = cuotas.filter(function (c) { return c.estado === 'pagado'; }).reduce(function (s, c) { return s + c.neto; }, 0);
         var pagadas = cuotas.filter(function (c) { return c.estado === 'pagado'; }).length;
         var sumaPct = cuotas.reduce(function (s, c) { return s + c.pct; }, 0), pct = pctOf(cobrado, neto);
-        return '<article class="fx-project" id="p-' + pr.id + '"><div class="fx-p-head"><div><h3>' + esc(pr.nombre) + '</h3>' +
+        return '<article class="fx-project" id="p-' + pr.id + '"><div class="fx-p-head"><div><h3>' + esc(pr.nombre) + '<span class="fx-badge b-' + slug(pr.estado) + '">' + esc(pr.estado) + '</span></h3>' +
             '<p class="fx-p-sub">' + pagadas + ' de ' + n + (n === 1 ? ' pago cobrado' : ' pagos cobrados') + ', ' + MON[pr.moneda].nombre.toLowerCase() + ' · ' +
             '<button type="button" class="fx-link fx-p-actions" data-act="edit-plan" data-pid="' + pr.id + '">Editar plan de pagos</button></p></div>' +
             '<div class="fx-p-total"><strong>' + money(pr.monto, pr.moneda) + '</strong><span>monto total sin IGV</span></div></div>' +
@@ -142,7 +169,7 @@
 
     function load(done) {
         $.getJSON(U.datos).done(function (res) {
-            D = res; renderChips();
+            D = res; FECHA_HOY = res.hoy; renderChips(); renderAlertas();
             var y = window.scrollY; renderMain(); window.scrollTo(0, y);
             if (done) { done(); }
         }).fail(function () { $('#contenido').html('<div class="fx-empty">No se pudo cargar la información.</div>'); });
@@ -167,24 +194,55 @@
 
     /* Pago */
     var $fc = $('#frmCuota'), ctxCuota = null;
-    function syncFecha() {
-        var pagado = $fc.find('[name=estado]:checked').val() === 'pagado';
-        $fc.find('[name=fecha]').prop('disabled', !pagado); if (!pagado) { $fc.find('[name=fecha]').val(''); }
+    function syncPago() {
+        var est = $fc.find('[name=estado]:checked').val();
+        $('#grpFactura, #grpAbonos').prop('hidden', est === 'pendiente');
+        $fc.find('[name=fecha]').prop('disabled', est !== 'pagado');
+        $fc.find('[name=factura]').attr('placeholder', est === 'facturado' ? 'Obligatorio' : 'Ej. FCT 51');
     }
-    $fc.on('change', '[name=estado]', syncFecha);
+    $fc.on('change', '[name=estado]', syncPago);
+    function pintarAbonos(pr, c) {
+        var cob = c.cobrado;
+        $('#abonoResumen').text('Neto ' + money(c.neto, pr.moneda) + ' · cobrado ' + money(cob, pr.moneda) + ' · saldo ' + money(c.neto - cob, pr.moneda));
+        $('#abonoLista').html(c.abonos.length ? c.abonos.map(function (a) {
+            return '<li><span>' + fmtFecha(a.fecha) + ' · <b>' + money(a.monto, pr.moneda) + '</b>' + (a.ref ? ' · ' + esc(a.ref) : '') + '</span>' +
+                '<button type="button" class="fx-link danger" data-act="del-abono" data-id="' + a.id + '">Quitar</button></li>';
+        }).join('') : '<li class="has-text-grey">Aún no hay abonos registrados.</li>');
+        $('#abMonto').val(c.neto - cob > 0.005 ? r2(c.neto - cob) : '');
+    }
     function abrirCuota(pid, id) {
         var pr = byId(pid), c = pr && pr.cuotas.filter(function (x) { return x.id === Number(id); })[0];
         if (!c) { return; }
-        ctxCuota = c.id;
+        ctxCuota = { pid: pr.id, id: c.id };
         $('#dlgCuotaSub').text(pr.nombre + ', ' + c.label);
+        $fc.find('.is-danger').removeClass('is-danger');
         $fc.find('[name=estado][value=' + c.estado + ']').prop('checked', true);
-        $fc.find('[name=factura]').val(c.factura).removeClass('is-danger');
-        $fc.find('[name=fecha]').val(c.fecha);
-        showErr($fc, ''); syncFecha(); open('#dlgCuota');
+        $fc.find('[name=factura]').val(c.factura); $fc.find('[name=emision]').val(c.emision); $fc.find('[name=vencimiento]').val(c.vencimiento);
+        $fc.find('[name=estimada]').val(c.estimada); $fc.find('[name=fecha]').val(c.fecha);
+        $fc.find('[name=detr_fecha]').val(c.detr_fecha); $fc.find('[name=detr_ref]').val(c.detr_ref);
+        $('#cHito').html('<option value="">Sin hito</option>' + pr.acts.map(function (a) {
+            return '<option value="' + a.id + '">' + esc(a.nombre) + ' (' + esc(a.estado) + ')</option>';
+        }).join('')).val(c.hito_id || '');
+        $('#detrHint').text('Detracción de este pago: ' + money(c.det, pr.moneda) + ' (' + D.detraccion + '% del total con IGV), depositada por el cliente en tu cuenta del Banco de la Nación.');
+        $('#abFecha').val(D.hoy); $('#abRef').val('');
+        pintarAbonos(pr, c); showErr($fc, ''); syncPago(); open('#dlgCuota');
     }
     $fc.on('submit', function (e) {
         e.preventDefault(); showErr($fc, ''); $fc.find('.is-danger').removeClass('is-danger');
-        $.post(U.cuota + '/' + ctxCuota, $fc.serialize()).done(saved).fail(function (x) { fail(x, $fc, 'No se pudo guardar.'); });
+        $.post(U.cuota + '/' + ctxCuota.id, $fc.serialize()).done(saved).fail(function (x) { fail(x, $fc, 'No se pudo guardar.'); });
+    });
+    // Los abonos se guardan al instante; el diálogo se queda abierto con los datos refrescados.
+    function trasAbono(res) {
+        toast(res.message);
+        load(function () { var pr = byId(ctxCuota.pid), c = pr && pr.cuotas.filter(function (x) { return x.id === ctxCuota.id; })[0]; if (c) { abrirCuota(pr.id, c.id); } else { close(); } });
+    }
+    $('#abAdd').on('click', function () {
+        showErr($fc, '');
+        $.post(U.abono + '/' + ctxCuota.id, { fecha: $('#abFecha').val(), monto: $('#abMonto').val(), ref: $('#abRef').val() })
+            .done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo registrar el abono.'); });
+    });
+    $(document).on('click', '[data-act=del-abono]', function () {
+        $.post(U.abonoDel + '/' + $(this).data('id')).done(trasAbono).fail(function (x) { showErr($fc, (x.responseJSON || {}).message || 'No se pudo quitar el abono.'); });
     });
 
     /* Actividad */
@@ -270,6 +328,7 @@
                 break;
             }
             case 'empresa': S.empresa = String($t.data('v')); $('#chips .fx-chip').each(function () { $(this).attr('aria-pressed', String($(this).data('v') === S.empresa)); }); renderMain(); break;
+            case 'filtro-estado': S.estado = String($t.data('v')); $('#fEstado').val(S.estado); renderMain(); break;
             case 'clear': S.empresa = '__all__'; S.estado = '__all__'; S.q = ''; $('#q').val(''); $('#fEstado').val('__all__'); renderChips(); renderMain(); break;
         }
     });

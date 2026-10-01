@@ -25,6 +25,8 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->post('facturas/plan', 'Facturas::plan');
     $routes->post('facturas/quitar/(:num)', 'Facturas::quitar/$1');
     $routes->post('facturas/cuota/(:num)', 'Facturas::cuota/$1');
+    $routes->post('facturas/abono/(:num)', 'Facturas::abono/$1');
+    $routes->post('facturas/abono-eliminar/(:num)', 'Facturas::abonoEliminar/$1');
     $routes->post('facturas/actividad/(:num)', 'Facturas::actividad/$1');
     $routes->post('facturas/actividad-eliminar/(:num)', 'Facturas::actividadEliminar/$1');
 

@@ -209,3 +209,36 @@ body.auth { background: #fff; }
     .fx-details > summary { display: none; }
 }
 [hidden] { display: none !important; }
+
+/* ---------- Seguimiento en Proyectos ---------- */
+.mini-bar { display: inline-flex; align-items: center; gap: .5rem; }
+.mini-track { width: 70px; height: 6px; border-radius: 999px; background: #e3e9ec; overflow: hidden; display: inline-block; }
+.mini-track > span { display: block; height: 100%; background: var(--kgi-accent); }
+.mini-bar b { font-size: .8rem; min-width: 2.4rem; text-align: left; }
+.tag.seg-en-ejecucio-n { background: #eef0f3; color: #4a5160; }
+.tag.seg-por-facturar { background: #fbf0d9; color: #7c5200; }
+.tag.seg-por-cobrar { background: #e3edf9; color: #1a5799; }
+.tag.seg-vencido { background: #fbe8e4; color: #a2382a; }
+.tag.seg-cerrado { background: #e2f3ea; color: #146a44; }
+
+/* ---------- Seguimiento de pagos ---------- */
+.fx-alertas { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; }
+.fx-alerta { border: 0; border-radius: 6px; padding: .55rem .9rem; font-size: .88rem; font-weight: 700; cursor: pointer; }
+.fx-alerta.danger { background: #fbe8e4; color: #a2382a; } .fx-alerta.warn { background: #fbf0d9; color: #7c5200; }
+.fx-alerta:hover { filter: brightness(.96); }
+.fx-badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .72rem; font-weight: 700; margin-left: .4rem; vertical-align: middle; }
+.fx-badge.b-en-ejecucio-n { background: #eef0f3; color: #4a5160; } .fx-badge.b-por-facturar { background: #fbf0d9; color: #7c5200; }
+.fx-badge.b-por-cobrar { background: #e3edf9; color: #1a5799; } .fx-badge.b-vencido { background: #fbe8e4; color: #a2382a; } .fx-badge.b-cerrado { background: #e2f3ea; color: #146a44; }
+.fx-flag { font-size: .75rem; font-weight: 700; padding: .15rem .5rem; border-radius: 4px; width: fit-content; }
+.fx-flag.listo { background: #fbf0d9; color: #7c5200; } .fx-flag.vencida { background: #fbe8e4; color: #a2382a; } .fx-flag.parcial { background: #e3edf9; color: #1a5799; }
+.fx-kpi-extra { margin-top: .6rem; padding-top: .6rem; border-top: 1px solid var(--kgi-border); display: grid; gap: .2rem; font-size: .82rem; }
+.fx-kpi-extra .danger { color: #a2382a; font-weight: 700; } .fx-kpi-extra .muted { color: #6b7285; }
+.fx-cuota-card { width: min(760px, calc(100vw - 24px)); }
+.fx-radios { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; } .fx-radios .fx-radio { margin: 0; }
+.fx-fieldset { border: 1px solid var(--kgi-border); border-radius: 8px; padding: .6rem .8rem .3rem; margin: .8rem 0; }
+.fx-fieldset legend { font-size: .8rem; font-weight: 700; color: #6b7285; padding: 0 .4rem; }
+.fx-abonos { list-style: none; display: grid; gap: .3rem; margin-bottom: .6rem; }
+.fx-abonos li { display: flex; justify-content: space-between; align-items: center; gap: .6rem; font-size: .85rem; padding: .35rem .6rem; background: #fafbfb; border: 1px solid var(--kgi-border); border-radius: 6px; }
+.fx-abono-form .column { padding-top: .2rem; padding-bottom: .2rem; }
+.fx-c-det { font-size: .75rem; color: #6b7285; } .fx-c-det.pend { color: #7c5200; font-weight: 700; }
+@media (max-width: 560px) { .fx-radios { grid-template-columns: 1fr; } }
