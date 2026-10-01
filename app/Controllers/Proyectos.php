@@ -27,7 +27,7 @@ class Proyectos extends CrudController
 
     protected function selectList(BaseBuilder $b): BaseBuilder
     {
-        return $b->select('proyectos.id, proyectos.cliente_id, proyectos.departamento, proyectos.nombre, clientes.nombre AS cliente')
+        return $b->select('proyectos.id, proyectos.cliente_id, proyectos.departamento, proyectos.nombre, proyectos.moneda, proyectos.monto, clientes.nombre AS cliente')
             ->join('clientes', 'clientes.id = proyectos.cliente_id', 'left');
     }
 
@@ -51,6 +51,10 @@ class Proyectos extends CrudController
             ['name' => 'nombre', 'label' => 'Proyecto', 'type' => 'text', 'rules' => 'permit_empty|max_length[255]'],
             ['name' => 'cliente_id', 'label' => 'Cliente', 'type' => 'select', 'options' => $clientes, 'empty' => 'Sin cliente',
                 'rules' => 'permit_empty|is_natural_no_zero|is_not_unique[clientes.id]'],
+            ['name' => 'moneda', 'label' => 'Moneda', 'type' => 'select', 'options' => ['PEN' => 'Soles (S/)', 'USD' => 'Dólares (US$)'],
+                'help' => 'Solo para el Control de facturas.', 'rules' => 'permit_empty|in_list[PEN,USD]|required_with[monto]'],
+            ['name' => 'monto', 'label' => 'Monto sin IGV', 'type' => 'number', 'help' => 'Si lo dejas vacío el proyecto no aparece en Control de facturas.',
+                'rules' => 'permit_empty|decimal|greater_than[0]|less_than[1000000000]|required_with[moneda]'],
         ];
     }
 }

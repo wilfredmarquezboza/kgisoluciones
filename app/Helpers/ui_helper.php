@@ -8,6 +8,7 @@ function menu_items(): array
             'proyectos' => ['Proyectos', 'fa-diagram-project'],
             'clientes'  => ['Clientes', 'fa-building'],
             'procesos'  => ['Procesos', 'fa-list-check'],
+            'facturas'  => ['Control de facturas', 'fa-file-invoice-dollar'],
         ]],
         'Seguridad' => ['fa-shield-halved', [
             'configuraciones' => ['Configuración', 'fa-gear'],

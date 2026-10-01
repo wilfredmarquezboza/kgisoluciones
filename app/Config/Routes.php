@@ -19,6 +19,15 @@ $routes->group('', ['filter' => 'auth'], static function ($routes) {
     $routes->get('/', static fn () => redirect()->to('/proyectos'));
     $routes->post('logout', 'Auth::logout');
 
+    $routes->get('facturas', 'Facturas::index');
+    $routes->get('facturas/datos', 'Facturas::datos');
+    $routes->get('facturas/exportar', 'Facturas::exportar');
+    $routes->post('facturas/plan', 'Facturas::plan');
+    $routes->post('facturas/quitar/(:num)', 'Facturas::quitar/$1');
+    $routes->post('facturas/cuota/(:num)', 'Facturas::cuota/$1');
+    $routes->post('facturas/actividad/(:num)', 'Facturas::actividad/$1');
+    $routes->post('facturas/actividad-eliminar/(:num)', 'Facturas::actividadEliminar/$1');
+
     foreach (['proyectos' => 'Proyectos', 'clientes' => 'Clientes', 'procesos' => 'Procesos',
         'configuraciones' => 'Configuraciones', 'perfiles' => 'Perfiles', 'usuarios' => 'Usuarios'] as $uri => $ctrl) {
         $routes->get($uri, "$ctrl::index");

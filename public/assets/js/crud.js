@@ -112,7 +112,7 @@
         } else if (f.type === 'textarea') {
             input = '<textarea class="textarea" rows="3" id="' + id + '" name="' + f.name + '"></textarea>';
         } else {
-            input = '<input class="input" id="' + id + '" name="' + f.name + '" type="' + (f.type || 'text') + '" autocomplete="' + (f.type === 'password' ? 'new-password' : 'off') + '">';
+            input = '<input class="input" id="' + id + '" name="' + f.name + '" type="' + (f.type || 'text') + '"' + (f.type === 'number' ? ' step="0.01" min="0"' : '') + ' autocomplete="' + (f.type === 'password' ? 'new-password' : 'off') + '">';
         }
         return '<div class="field" data-field="' + f.name + '"><label class="label" for="' + id + '">' + esc(f.label) +
             '<span class="req has-text-danger"' + (req ? '' : ' hidden') + '> *</span></label><div class="control">' + input + '</div>' +
